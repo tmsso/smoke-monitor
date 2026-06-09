@@ -1,0 +1,23 @@
+[audio]
+# Leave empty to use the system default microphone.
+# Run `python -c "import sounddevice; print(sounddevice.query_devices())"` to list devices.
+# Set to device name (string) or index (integer) for a specific mic.
+device = ""
+sample_rate = 44100
+window_seconds = 0.5
+
+[detection]
+# Frequency band to watch (Hz). Most smoke detectors beep at 3100-3400 Hz.
+freq_low_hz = 3000
+freq_high_hz = 3600
+# Fraction of total spectral energy that must fall in the band to count as a hit.
+energy_ratio_threshold = 0.35
+# Alert fires when confirm_windows out of the last confirm_out_of windows are hits.
+confirm_windows = 5
+confirm_out_of = 8
+
+[notification]
+ntfy_topic = "change-me-to-a-secret-string"
+# Override for self-hosted ntfy instance.
+ntfy_url = "https://ntfy.sh"
+cooldown_minutes = 10

@@ -1,0 +1,17 @@
+[Unit]
+Description=Smoke alarm audio monitor
+After=sound.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tomi
+WorkingDirectory=/home/tomi/git/smoke-monitor
+ExecStart=/home/tomi/git/smoke-monitor/.venv/bin/python monitor.py config.toml
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
