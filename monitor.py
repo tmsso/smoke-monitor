@@ -31,9 +31,9 @@ def resolve_device(device_setting):
         return device_setting
 
 
-def run(config_path: str = "config.toml"):
+def run(config_path: str = "config.toml", testing: bool = False):
     config = load_config(config_path)
-    detector = SmokeDetector(config)
+    detector = SmokeDetector(config, testing=testing)
     notifier = Notifier(config)
 
     sample_rate = config["audio"]["sample_rate"]
@@ -44,11 +44,12 @@ def run(config_path: str = "config.toml"):
     last_alert_time = 0.0
 
     logger.info(
-        "Starting smoke monitor | device=%s | window=%.1fs | freq=%d-%dHz",
+        "Starting smoke monitor | device=%s | window=%.1fs | freq=%d-%dHz%s",
         device or "default",
         config["audio"]["window_seconds"],
         config["detection"]["freq_low_hz"],
         config["detection"]["freq_high_hz"],
+        " | TESTING MODE" if testing else "",
     )
 
     def audio_callback(indata, frames, time_info, status):
@@ -84,6 +85,16 @@ def run(config_path: str = "config.toml"):
 
 
 if __name__ == "__main__":
-    import sys
-    cfg = sys.argv[1] if len(sys.argv) > 1 else "config.toml"
-    run(cfg)
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Smoke alarm audio monitor")
+    parser.add_argument(
+        "--config", default="config.toml", metavar="PATH",
+        help="Path to config file (default: config.toml)",
+    )
+    parser.add_argument(
+        "--test", action="store_true",
+        help="Testing mode: notify on first detection event, skip confirmation window",
+    )
+    args = parser.parse_args()
+    run(config_path=args.config, testing=args.test)
