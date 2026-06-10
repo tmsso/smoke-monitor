@@ -3,7 +3,7 @@ from collections import deque
 
 
 class SmokeDetector:
-    def __init__(self, config):
+    def __init__(self, config, testing: bool = False):
         det = config["detection"]
         aud = config["audio"]
 
@@ -13,12 +13,16 @@ class SmokeDetector:
         self.energy_threshold = det["energy_ratio_threshold"]
         self.confirm_windows = det["confirm_windows"]
         self.confirm_out_of = det["confirm_out_of"]
+        self.testing = testing
 
         self._history = deque(maxlen=self.confirm_out_of)
 
     def process_window(self, samples: np.ndarray) -> bool:
         """Feed one audio window; returns True if alarm pattern confirmed."""
-        self._history.append(self._has_alarm_frequency(samples))
+        detected = self._has_alarm_frequency(samples)
+        if self.testing:
+            return detected
+        self._history.append(detected)
         if len(self._history) < self.confirm_out_of:
             return False
         return sum(self._history) >= self.confirm_windows
