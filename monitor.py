@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import logging
+import queue
+import threading
 import time
 import tomllib
 import numpy as np
@@ -42,6 +44,7 @@ def run(config_path: str = "config.toml", testing: bool = False):
     cooldown_seconds = config["notification"]["cooldown_minutes"] * 60
 
     last_alert_time = 0.0
+    audio_queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=16)
 
     logger.info(
         "Starting smoke monitor | device=%s | window=%.1fs | freq=%d-%dHz%s",
@@ -53,20 +56,31 @@ def run(config_path: str = "config.toml", testing: bool = False):
     )
 
     def audio_callback(indata, frames, time_info, status):
-        nonlocal last_alert_time
         if status:
             logger.warning("Audio status: %s", status)
+        try:
+            audio_queue.put_nowait(indata[:, 0].copy())
+        except queue.Full:
+            pass  # drop the window rather than block the audio thread
 
-        samples = indata[:, 0].astype(np.float32)
-        if detector.process_window(samples):
-            now = time.monotonic()
-            if now - last_alert_time >= cooldown_seconds:
-                last_alert_time = now
-                logger.warning("ALARM DETECTED — sending notification")
-                notifier.send()
-            else:
-                remaining = int(cooldown_seconds - (now - last_alert_time))
-                logger.info("Alarm detected but in cooldown (%ds remaining)", remaining)
+    def process_loop():
+        nonlocal last_alert_time
+        while True:
+            samples = audio_queue.get()
+            if samples is None:
+                break
+            if detector.process_window(samples.astype(np.float32)):
+                now = time.monotonic()
+                if now - last_alert_time >= cooldown_seconds:
+                    last_alert_time = now
+                    logger.warning("ALARM DETECTED — sending notification")
+                    notifier.send()
+                else:
+                    remaining = int(cooldown_seconds - (now - last_alert_time))
+                    logger.info("Alarm detected but in cooldown (%ds remaining)", remaining)
+
+    worker = threading.Thread(target=process_loop, daemon=True)
+    worker.start()
 
     with sd.InputStream(
         samplerate=sample_rate,
@@ -82,6 +96,8 @@ def run(config_path: str = "config.toml", testing: bool = False):
                 time.sleep(1)
         except KeyboardInterrupt:
             logger.info("Stopped by user")
+    audio_queue.put(None)
+    worker.join()
 
 
 if __name__ == "__main__":
@@ -96,5 +112,13 @@ if __name__ == "__main__":
         "--test", action="store_true",
         help="Testing mode: notify on first detection event, skip confirmation window",
     )
+    parser.add_argument(
+        "--notify", action="store_true",
+        help="Send a test notification immediately and exit",
+    )
     args = parser.parse_args()
-    run(config_path=args.config, testing=args.test)
+    if args.notify:
+        config = load_config(args.config)
+        Notifier(config).send("Test notification from smoke-monitor")
+    else:
+        run(config_path=args.config, testing=args.test)
