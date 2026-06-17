@@ -88,6 +88,7 @@ def run(config_path: str = "config.toml", testing: bool = False):
         device=device,
         channels=1,
         dtype="float32",
+        latency="high",
         callback=audio_callback,
     ):
         logger.info("Listening… press Ctrl+C to stop")
