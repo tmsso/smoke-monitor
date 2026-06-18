@@ -6,8 +6,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=tomi
-WorkingDirectory=/home/tomi/git/smoke-monitor
-ExecStart=/home/tomi/git/smoke-monitor/.venv/bin/python monitor.py --config config.toml
+WorkingDirectory=%h/git/smoke-monitor
+EnvironmentFile=%h/git/smoke-monitor/.env
+ExecStart=%h/git/smoke-monitor/.venv/bin/python monitor.py --config config.toml
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal

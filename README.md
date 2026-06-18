@@ -11,8 +11,8 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-cp config.toml.example config.toml
-# Edit config.toml — set ntfy_topic to a secret string, adjust device if needed
+cp .env.example .env
+# Edit .env — set NTFY_TOPIC to your private ntfy topic
 ```
 
 **List available audio devices:**
@@ -22,7 +22,7 @@ python -c "import sounddevice; print(sounddevice.query_devices())"
 
 **Run manually:**
 ```bash
-python monitor.py
+source .env && python monitor.py
 ```
 
 ## Install as systemd service
