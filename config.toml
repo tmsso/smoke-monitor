@@ -3,7 +3,7 @@
 # Run `python -c "import sounddevice; print(sounddevice.query_devices())"` to list devices.
 # Set to device name (string) or index (integer) for a specific mic.
 device = ""
-sample_rate = 44100
+sample_rate = 16000
 window_seconds = 0.5
 
 [detection]
@@ -17,7 +17,7 @@ confirm_windows = 5
 confirm_out_of = 8
 
 [notification]
-ntfy_topic = "change-me-to-a-secret-string"
+# ntfy_topic is loaded from the NTFY_TOPIC environment variable (see .env.example).
 # Override for self-hosted ntfy instance.
 ntfy_url = "https://ntfy.sh"
 cooldown_minutes = 10

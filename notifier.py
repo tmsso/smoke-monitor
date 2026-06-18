@@ -1,5 +1,6 @@
 import httpx
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -7,7 +8,10 @@ logger = logging.getLogger(__name__)
 class Notifier:
     def __init__(self, config):
         ntfy = config["notification"]
-        self.url = ntfy["ntfy_url"].rstrip("/") + "/" + ntfy["ntfy_topic"]
+        topic = os.environ.get("NTFY_TOPIC") or ntfy.get("ntfy_topic", "")
+        if not topic:
+            raise ValueError("NTFY_TOPIC env var is not set")
+        self.url = ntfy["ntfy_url"].rstrip("/") + "/" + topic
         self.cooldown_minutes = ntfy["cooldown_minutes"]
 
     def send(self, message: str = "Smoke alarm detected on intermouse!"):
