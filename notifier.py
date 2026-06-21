@@ -14,15 +14,15 @@ class Notifier:
         self.url = ntfy["ntfy_url"].rstrip("/") + "/" + topic
         self.cooldown_minutes = ntfy["cooldown_minutes"]
 
-    def send(self, message: str = "Smoke alarm detected on intermouse!"):
+    def send(self, message: str = "Smoke alarm detected on intermouse!", title: str = "SMOKE ALARM", tags: str = "rotating_light,fire"):
         try:
             resp = httpx.post(
                 self.url,
                 content=message,
                 headers={
-                    "Title": "SMOKE ALARM",
+                    "Title": title,
                     "Priority": "urgent",
-                    "Tags": "rotating_light,fire",
+                    "Tags": tags,
                 },
                 timeout=10,
             )

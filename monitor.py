@@ -33,6 +33,17 @@ def resolve_device(device_setting):
         return device_setting
 
 
+AC_STATUS_PATH = Path("/sys/class/power_supply/AC/online")
+
+
+def _read_ac_online() -> bool | None:
+    """Return True if on AC power, False if on battery, None if unreadable."""
+    try:
+        return AC_STATUS_PATH.read_text().strip() == "1"
+    except OSError:
+        return None
+
+
 def run(config_path: str = "config.toml", testing: bool = False):
     config = load_config(config_path)
     detector = SmokeDetector(config, testing=testing)
@@ -42,6 +53,7 @@ def run(config_path: str = "config.toml", testing: bool = False):
     window_size = int(sample_rate * config["audio"]["window_seconds"])
     device = resolve_device(config["audio"].get("device", ""))
     cooldown_seconds = config["notification"]["cooldown_minutes"] * 60
+    power_cooldown_seconds = config["notification"].get("power_loss_cooldown_minutes", 30) * 60
 
     last_alert_time = 0.0
     audio_queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=16)
@@ -79,8 +91,38 @@ def run(config_path: str = "config.toml", testing: bool = False):
                     remaining = int(cooldown_seconds - (now - last_alert_time))
                     logger.info("Alarm detected but in cooldown (%ds remaining)", remaining)
 
+    stop_event = threading.Event()
+
+    def power_monitor_loop():
+        last_power_alert_time = 0.0
+        previous_ac = _read_ac_online()
+        if previous_ac is None:
+            logger.warning("Power supply status unavailable — power loss monitoring disabled")
+            return
+        while not stop_event.wait(30):
+            ac_online = _read_ac_online()
+            if ac_online is None:
+                continue
+            if previous_ac and not ac_online:
+                now = time.monotonic()
+                if now - last_power_alert_time >= power_cooldown_seconds:
+                    last_power_alert_time = now
+                    logger.warning("AC power lost — sending notification")
+                    notifier.send(
+                        message="Laptop lost AC power!",
+                        title="POWER ALERT",
+                        tags="electric_plug,warning",
+                    )
+                else:
+                    remaining = int(power_cooldown_seconds - (now - last_power_alert_time))
+                    logger.info("Power loss detected but in cooldown (%ds remaining)", remaining)
+            previous_ac = ac_online
+
     worker = threading.Thread(target=process_loop, daemon=True)
     worker.start()
+
+    power_worker = threading.Thread(target=power_monitor_loop, daemon=True)
+    power_worker.start()
 
     with sd.InputStream(
         samplerate=sample_rate,
@@ -97,8 +139,10 @@ def run(config_path: str = "config.toml", testing: bool = False):
                 time.sleep(1)
         except KeyboardInterrupt:
             logger.info("Stopped by user")
+    stop_event.set()
     audio_queue.put(None)
     worker.join()
+    power_worker.join()
 
 
 if __name__ == "__main__":
