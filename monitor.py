@@ -99,6 +99,14 @@ def run(config_path: str = "config.toml", testing: bool = False):
         if previous_ac is None:
             logger.warning("Power supply status unavailable — power loss monitoring disabled")
             return
+        if not previous_ac:
+            logger.warning("Started on battery power — sending notification")
+            last_power_alert_time = time.monotonic()
+            notifier.send(
+                message="Laptop lost AC power!",
+                title="POWER ALERT",
+                tags="electric_plug,warning",
+            )
         while not stop_event.wait(30):
             ac_online = _read_ac_online()
             if ac_online is None:
