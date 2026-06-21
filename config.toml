@@ -21,3 +21,4 @@ confirm_out_of = 8
 # Override for self-hosted ntfy instance.
 ntfy_url = "https://ntfy.sh"
 cooldown_minutes = 10
+power_loss_cooldown_minutes = 30
