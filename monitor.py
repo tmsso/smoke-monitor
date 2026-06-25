@@ -130,11 +130,11 @@ def run(config_path: str = "config.toml", testing: bool = False):
     def heartbeat_loop():
         notif = config["notification"]
         interval_hours = notif.get("heartbeat_interval_hours", 24)
-        if not interval_hours:
+        if interval_hours <= 0:
             return
         time_str = notif.get("heartbeat_time", "09:00")
         try:
-            hh, mm = (int(p) for p in time_str.split(":"))
+            hh, mm = (int(p) for p in time_str.split(":")[:2])
         except ValueError:
             logger.error("Invalid heartbeat_time %r — expected HH:MM, heartbeat disabled", time_str)
             return
