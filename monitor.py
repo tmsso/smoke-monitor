@@ -4,6 +4,7 @@ import queue
 import threading
 import time
 import tomllib
+from datetime import datetime, timedelta
 import numpy as np
 import sounddevice as sd
 from pathlib import Path
@@ -126,11 +127,53 @@ def run(config_path: str = "config.toml", testing: bool = False):
                     logger.info("Power loss detected but in cooldown (%ds remaining)", remaining)
             previous_ac = ac_online
 
+    def heartbeat_loop():
+        notif = config["notification"]
+        interval_hours = notif.get("heartbeat_interval_hours", 24)
+        if interval_hours <= 0:
+            return
+        time_str = notif.get("heartbeat_time", "09:00")
+        try:
+            hh, mm = (int(p) for p in time_str.split(":")[:2])
+        except ValueError:
+            logger.error("Invalid heartbeat_time %r — expected HH:MM, heartbeat disabled", time_str)
+            return
+
+        now = datetime.now()
+        first = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        if first <= now:
+            first += timedelta(days=1)
+        wait = (first - now).total_seconds()
+        logger.info("First heartbeat scheduled at %s (%.0fs from now)", first.strftime("%H:%M"), wait)
+
+        if stop_event.wait(wait):
+            return
+        notifier.send(
+            message="Smoke monitor is running normally.",
+            title="Smoke Monitor OK",
+            tags="white_check_mark",
+            priority="low",
+        )
+        logger.info("Heartbeat sent")
+
+        interval_seconds = interval_hours * 3600
+        while not stop_event.wait(interval_seconds):
+            notifier.send(
+                message="Smoke monitor is running normally.",
+                title="Smoke Monitor OK",
+                tags="white_check_mark",
+                priority="low",
+            )
+            logger.info("Heartbeat sent")
+
     worker = threading.Thread(target=process_loop, daemon=True)
     worker.start()
 
     power_worker = threading.Thread(target=power_monitor_loop, daemon=True)
     power_worker.start()
+
+    heartbeat_worker = threading.Thread(target=heartbeat_loop, daemon=True)
+    heartbeat_worker.start()
 
     with sd.InputStream(
         samplerate=sample_rate,
@@ -151,6 +194,7 @@ def run(config_path: str = "config.toml", testing: bool = False):
     audio_queue.put(None)
     worker.join()
     power_worker.join()
+    heartbeat_worker.join()
 
 
 if __name__ == "__main__":

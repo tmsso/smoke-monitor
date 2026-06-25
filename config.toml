@@ -22,3 +22,7 @@ confirm_out_of = 8
 ntfy_url = "https://ntfy.sh"
 cooldown_minutes = 10
 power_loss_cooldown_minutes = 30
+# Periodic "still alive" ping. Set heartbeat_interval_hours = 0 to disable.
+heartbeat_interval_hours = 24
+# First heartbeat fires at or after this local time to avoid overnight notifications.
+heartbeat_time = "09:00"
