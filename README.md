@@ -46,3 +46,15 @@ If the alarm is missed or false positives occur, adjust in `config.toml`:
 - `energy_ratio_threshold` — lower = more sensitive, higher = more conservative
 - `freq_low_hz` / `freq_high_hz` — narrow to match your detector's exact frequency
 - `confirm_windows` / `confirm_out_of` — raise both for more confirmation required
+
+## Heartbeat
+
+The monitor sends a daily low-priority "still alive" notification so silence is never mistaken for normal operation. Configure in `config.toml`:
+
+```toml
+[notification]
+heartbeat_interval_hours = 24   # set to 0 to disable
+heartbeat_time = "09:00"        # first heartbeat fires at or after this local time
+```
+
+Subsequent pings follow every `heartbeat_interval_hours` from the first. Setting `heartbeat_time` prevents overnight notifications when the service (re)starts.
