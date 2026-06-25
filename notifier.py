@@ -1,8 +1,11 @@
 import httpx
 import logging
 import os
+import socket
 
 logger = logging.getLogger(__name__)
+
+_HOSTNAME = socket.gethostname()
 
 
 class Notifier:
@@ -14,7 +17,9 @@ class Notifier:
         self.url = ntfy["ntfy_url"].rstrip("/") + "/" + topic
         self.cooldown_minutes = ntfy["cooldown_minutes"]
 
-    def send(self, message: str = "Smoke alarm detected on intermouse!", title: str = "SMOKE ALARM", tags: str = "rotating_light,fire", priority: str = "urgent"):
+    def send(self, message: str = "", title: str = "SMOKE ALARM", tags: str = "rotating_light,fire", priority: str = "urgent"):
+        if not message:
+            message = f"Smoke alarm detected on {_HOSTNAME}!"
         try:
             resp = httpx.post(
                 self.url,

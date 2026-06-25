@@ -4,7 +4,7 @@ Planned features in rough priority order. Open an issue or PR to discuss any of 
 
 ## Reliability
 
-- **Heartbeat notification** — periodic "still alive" ping (configurable interval, e.g. daily) so silence doesn't look like normal operation
+- ~~**Heartbeat notification**~~ — done: periodic "still alive" ping with configurable interval and first-fire time
 - **Microphone disconnect detection** — alert if sustained zero-energy windows suggest the audio device has gone away
 
 ## Power monitoring
