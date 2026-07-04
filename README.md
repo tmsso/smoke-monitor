@@ -22,7 +22,10 @@ python -c "import sounddevice; print(sounddevice.query_devices())"
 
 **Run manually:**
 ```bash
-source .env && python monitor.py
+python monitor.py            # .env is loaded automatically
+python monitor.py --debug    # also log the per-window band energy ratio
+python monitor.py --test     # fire on a single detected window (skip confirmation)
+python monitor.py --notify   # send one test notification and exit
 ```
 
 ## Install as systemd service
@@ -58,3 +61,37 @@ heartbeat_time = "09:00"        # first heartbeat fires at or after this local t
 ```
 
 Subsequent pings follow every `heartbeat_interval_hours` from the first. Setting `heartbeat_time` prevents overnight notifications when the service (re)starts.
+
+## Troubleshooting
+
+**The alarm never triggers / no hits even when beeping at the mic.**
+
+First check the mic is actually capturing audio. Run with `--debug` and watch the
+per-window band ratio — it should jump toward 1.0 when the alarm sounds:
+
+```bash
+sudo systemctl stop smoke-monitor        # release the mic
+python monitor.py --debug --test         # --test fires on a single hit
+```
+
+- **`ratio` rises when you beep** → the mic works; a real (sustained) alarm will
+  confirm. Short test chirps are filtered by design (needs ~2.5s of tone).
+- **`ratio` stays ~0** → the mic is delivering silence. See below.
+
+**Microphone muted (delivers pure silence).** A muted mic returns exactly-zero
+samples, so detection is impossible. The monitor now logs a loud warning after
+~10s of pure silence: `Microphone appears muted or disconnected`. On laptops the
+mic-mute is a codec-level `Capture Switch`; without a desktop environment the
+mic-mute key has no handler, so the switch can stay muted (the mic-mute LED stays
+lit). Confirm and fix with ALSA:
+
+```bash
+# Confirm silence — RMS/peak of 0.0 means muted or dead:
+python -c "import numpy as np, sounddevice as sd; r=sd.rec(32000,samplerate=16000,channels=1); sd.wait(); print('peak', float(np.max(np.abs(r))))"
+
+# Fix (requires alsa-utils):
+sudo apt install -y alsa-utils
+amixer -c 0 sset Capture cap        # unmute + enable capture
+amixer -c 0 sset Capture 80%        # sane capture level
+sudo alsactl store                  # persist across reboots
+```

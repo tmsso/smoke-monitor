@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import logging
+import os
 import queue
 import threading
 import time
@@ -22,6 +23,28 @@ logger = logging.getLogger(__name__)
 def load_config(path: str = "config.toml") -> dict:
     with open(path, "rb") as f:
         return tomllib.load(f)
+
+
+def load_dotenv(path: str = ".env") -> None:
+    """Load KEY=value pairs from a .env file without overriding existing env vars.
+
+    Keeps parity with systemd's EnvironmentFile so manual runs work too. Values
+    already set in the environment (e.g. by systemd or the shell) take precedence.
+    """
+    env_path = Path(path)
+    if not env_path.exists():
+        return
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        line = line.removeprefix("export ").strip()
+        key, sep, value = line.partition("=")
+        if not sep:
+            continue
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
 
 
 def resolve_device(device_setting):
@@ -76,12 +99,34 @@ def run(config_path: str = "config.toml", testing: bool = False):
         except queue.Full:
             pass  # drop the window rather than block the audio thread
 
+    silence_warn_after = int(10 / config["audio"]["window_seconds"])  # ~10s of pure silence
+
     def process_loop():
         nonlocal last_alert_time
+        silent_windows = 0
+        silence_warned = False
         while True:
             samples = audio_queue.get()
             if samples is None:
                 break
+            # A muted or disconnected mic delivers exactly-zero samples; a live mic
+            # always carries some noise/DC offset. Warn so silence isn't mistaken
+            # for "all quiet" — otherwise a muted mic never alerts and looks healthy.
+            if not np.any(samples):
+                silent_windows += 1
+                if silent_windows >= silence_warn_after and not silence_warned:
+                    logger.warning(
+                        "Microphone appears muted or disconnected — %.0fs of pure "
+                        "silence. No smoke alarm can be detected! Check the mic mute "
+                        "(see README: Troubleshooting).",
+                        silent_windows * config["audio"]["window_seconds"],
+                    )
+                    silence_warned = True
+            else:
+                if silence_warned:
+                    logger.warning("Microphone signal restored — resuming detection")
+                silent_windows = 0
+                silence_warned = False
             if detector.process_window(samples.astype(np.float32)):
                 now = time.monotonic()
                 if now - last_alert_time >= cooldown_seconds:
@@ -213,7 +258,14 @@ if __name__ == "__main__":
         "--notify", action="store_true",
         help="Send a test notification immediately and exit",
     )
+    parser.add_argument(
+        "--debug", action="store_true",
+        help="Log the per-window band energy ratio to diagnose detection",
+    )
     args = parser.parse_args()
+    load_dotenv()
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
     if args.notify:
         config = load_config(args.config)
         Notifier(config).send("Test notification from smoke-monitor")
