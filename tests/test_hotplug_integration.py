@@ -53,6 +53,9 @@ class FakeStream:
         FakeStream.instances += 1
         self._callback = callback
         self._blocksize = blocksize
+        # Deliver a window every blocksize/samplerate seconds, exactly as a real
+        # InputStream with blocksize = sample_rate * window_seconds does.
+        self._interval = blocksize / samplerate
         self._run = False
 
     def __enter__(self):
@@ -72,7 +75,7 @@ class FakeStream:
             else:
                 frame = (np.random.randn(self._blocksize, 1) * 0.05).astype("float32")
             self._callback(frame, self._blocksize, None, None)
-            time.sleep(WIN_S)
+            time.sleep(self._interval)
 
 
 def _patch(monkeypatch):
@@ -115,3 +118,24 @@ def test_healthy_device_never_reconnects(monkeypatch):
     assert FakeStream.instances == 1, (
         f"healthy mic should open exactly once, opened {FakeStream.instances}×"
     )
+
+
+def test_tight_recovery_config_holds_cadence(monkeypatch):
+    # window_seconds 0.5 + hotplug_silence_seconds 5 → silence limit of 10, below
+    # the audio_queue depth (16). Regression guard for #8 at a low limit, and for
+    # the queue drained on reset() (a stale pre-loss backlog must not add reopens).
+    cfg = {
+        **BASE_CONFIG,
+        "audio": {**BASE_CONFIG["audio"], "window_seconds": 0.5,
+                  "hotplug_silence_seconds": 5},
+    }
+    monkeypatch.setattr(monitor, "load_config", lambda *_a, **_k: cfg)
+    monkeypatch.setattr(monitor.sd, "InputStream", FakeStream)
+    monkeypatch.setattr(monitor.sd, "query_devices", lambda *a, **k: FAKE_DEVICES)
+    monkeypatch.setattr(monitor.Notifier, "send", lambda *a, **k: None)
+    FakeStream.instances = 0
+    FakeStream.silent = True
+    _run_run(18)
+    n = FakeStream.instances
+    # ~3 legit reopens (one per 5 s). Was ~18 before #8 (one per 1 s tick).
+    assert n <= 5, f"tight config thrashed: {n} opens in 18 s (expected ~3)"

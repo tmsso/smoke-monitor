@@ -132,6 +132,15 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
         def reset(cls):
             cls.last_window_ts = time.monotonic()
             cls.consecutive_silent = 0
+            # Discard windows captured before the reconnect: up to `maxsize`
+            # stale all-zero frames could otherwise be drained by process_loop
+            # right after a reset and re-trip the hotplug silence limit on their
+            # own (matters when it's tuned low, e.g. 5 s / 0.5 s windows → 10).
+            try:
+                while True:
+                    audio_queue.get_nowait()
+            except queue.Empty:
+                pass
 
     health = _Health
 
