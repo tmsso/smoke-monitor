@@ -50,6 +50,20 @@ python monitor.py --test     # fire on a single detected window (skip confirmati
 python monitor.py --notify   # send one test notification and exit
 ```
 
+**Test without the real alarm.** `--play-tone` plays a synthetic 3200 Hz T3
+alarm pattern through the speakers, then exits — no stream, no notifications:
+
+```bash
+python monitor.py --play-tone            # 15 s at 3200 Hz
+python monitor.py --play-tone 30         # 30 s
+python monitor.py --play-tone --tone-hz 2900
+```
+
+Run it in one terminal against `python monitor.py --test` in another for an
+end-to-end check through the actual mic. `--test` fires on a single in-band
+window; a non-`--test` run needs sustained tone across the confirmation window,
+so `--play-tone`'s beep/gap cadence drives `--test` but not a full run.
+
 ## Install as systemd service
 
 ```bash

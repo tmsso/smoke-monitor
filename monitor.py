@@ -406,11 +406,30 @@ if __name__ == "__main__":
         "--debug", action="store_true",
         help="Log the per-window band energy ratio to diagnose detection",
     )
+    parser.add_argument(
+        "--play-tone", nargs="?", type=float, const=None, default=False,
+        metavar="SECONDS",
+        help="Play a synthetic T3 alarm tone through the speakers and exit "
+             "(default 15s). Run against --test in another terminal for an "
+             "end-to-end check without the real alarm.",
+    )
+    parser.add_argument(
+        "--tone-hz", type=float, default=None, metavar="HZ",
+        help="Frequency for --play-tone (default 3200)",
+    )
     args = parser.parse_args()
     load_dotenv()
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
-    if args.notify:
+    if args.play_tone is not False:
+        from tone import DEFAULT_HZ, DEFAULT_SECONDS, play_tone
+
+        seconds = args.play_tone if args.play_tone is not None else DEFAULT_SECONDS
+        freq = args.tone_hz if args.tone_hz is not None else DEFAULT_HZ
+        logger.info("Playing %.0f Hz T3 tone for %.1fs…", freq, seconds)
+        play_tone(freq_hz=freq, duration_seconds=seconds)
+        logger.info("Tone finished")
+    elif args.notify:
         config = load_config(args.config)
         Notifier(config).send("Test notification from smoke-monitor")
     else:
