@@ -30,7 +30,12 @@ config change means setting off the real alarm — it's loud and drains its
 battery. After this batch, tuning happens on screen with recorded or
 synthetic audio, and swapping in a USB mic requires no config surgery.
 
-- **Device priority list** — in `config.toml [audio]`, add
+Status: device priority, hotplug handling, and the synthetic tone shipped
+(PRs #3–#5); physical USB-mic / speaker-coupling checks are in
+`manual-tests/2026-09-04-batch1-mic-support.md`. Still open: live tuning
+dashboard, event recorder, replay mode.
+
+- ~~**Device priority list**~~ — *done (PR #3).* In `config.toml [audio]`, add
   `device_priority = []`: an ordered list of device name substrings or
   integer indices. On startup, enumerate `sounddevice.query_devices()`
   input devices and pick the first match; log the chosen device name and
@@ -39,7 +44,7 @@ synthetic audio, and swapping in a USB mic requires no config surgery.
   match against device names.
   *Done when:* with a USB mic listed first and plugged in it is chosen;
   unplugged, the next entry (or default) is chosen; choice is logged.
-- **Hotplug handling** — detect that the active input device has gone away:
+- ~~**Hotplug handling**~~ — *done (PR #4).* Detect that the active input device has gone away:
   (a) `sd.InputStream` raises/aborts, or (b) `hotplug_silence_seconds`
   (default 60, `[audio]`) of consecutive zero-energy windows. On loss:
   close the stream, re-enumerate every 5 s, reopen on the best available
@@ -62,7 +67,7 @@ synthetic audio, and swapping in a USB mic requires no config surgery.
   keep the bool API for callers via a thin wrapper if simpler.
   *Done when:* running `--dashboard` next to a phone playing a 3.2 kHz
   tone visibly moves the meter past the threshold and counts hits.
-- **Synthetic alarm tone** (`--play-tone`) — play an alarm-like beep
+- ~~**Synthetic alarm tone**~~ (`--play-tone`) — *done (PR #5).* Play an alarm-like beep
   pattern through the speakers via `sounddevice.play`: default 3200 Hz
   square-ish tone in T3 cadence (3 × 0.5 s beeps with 0.5 s gaps, 1.5 s
   pause, repeat) for 15 s. Flags/config: frequency and duration
