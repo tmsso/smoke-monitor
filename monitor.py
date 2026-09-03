@@ -81,7 +81,7 @@ def _read_ac_online() -> bool | None:
         return None
 
 
-def run(config_path: str = "config.toml", testing: bool = False):
+def run(config_path: str = "config.toml", testing: bool = False, stop_event=None):
     config = load_config(config_path)
     detector = SmokeDetector(config, testing=testing)
     notifier = Notifier(config)
@@ -153,11 +153,10 @@ def run(config_path: str = "config.toml", testing: bool = False):
         except queue.Full:
             pass  # drop the window rather than block the audio thread
 
-    silence_warn_after = int(10 / config["audio"]["window_seconds"])  # ~10s of pure silence
+    silence_warn_after = int(10 / window_seconds)  # ~10s of pure silence
 
     def process_loop():
         nonlocal last_alert_time
-        silent_windows = 0
         silence_warned = False
         while True:
             samples = audio_queue.get()
@@ -166,21 +165,25 @@ def run(config_path: str = "config.toml", testing: bool = False):
             # A muted or disconnected mic delivers exactly-zero samples; a live mic
             # always carries some noise/DC offset. Warn so silence isn't mistaken
             # for "all quiet" — otherwise a muted mic never alerts and looks healthy.
+            # health.consecutive_silent is the single source of truth for the run
+            # length: the supervisor zeroes it on reconnect, and we resume from
+            # whatever it holds so a reconnect actually restarts the count (rather
+            # than a stale local counter re-tripping the hotplug limit every cycle).
             if not np.any(samples):
-                silent_windows += 1
-                health.consecutive_silent = silent_windows
-                if silent_windows >= silence_warn_after and not silence_warned:
+                if health.consecutive_silent == 0:
+                    silence_warned = False  # fresh silent run (start or post-reconnect)
+                health.consecutive_silent += 1
+                if health.consecutive_silent >= silence_warn_after and not silence_warned:
                     logger.warning(
                         "Microphone appears muted or disconnected — %.0fs of pure "
                         "silence. No smoke alarm can be detected! Check the mic mute "
                         "(see README: Troubleshooting).",
-                        silent_windows * config["audio"]["window_seconds"],
+                        health.consecutive_silent * window_seconds,
                     )
                     silence_warned = True
             else:
                 if silence_warned:
                     logger.warning("Microphone signal restored — resuming detection")
-                silent_windows = 0
                 health.consecutive_silent = 0
                 silence_warned = False
             if detector.process_window(samples.astype(np.float32)):
@@ -193,7 +196,11 @@ def run(config_path: str = "config.toml", testing: bool = False):
                     remaining = int(cooldown_seconds - (now - last_alert_time))
                     logger.info("Alarm detected but in cooldown (%ds remaining)", remaining)
 
-    stop_event = threading.Event()
+    # Callers (tests, an embedding process) can pass their own event to shut the
+    # worker threads and the stream supervisor down cleanly; __main__ relies on
+    # KeyboardInterrupt instead and leaves this None.
+    if stop_event is None:
+        stop_event = threading.Event()
 
     def power_monitor_loop():
         last_power_alert_time = 0.0
