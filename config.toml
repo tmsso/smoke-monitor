@@ -3,6 +3,12 @@
 # Run `python -c "import sounddevice; print(sounddevice.query_devices())"` to list devices.
 # Set to device name (string) or index (integer) for a specific mic.
 device = ""
+# Ordered preference list, checked before `device`. Entries are case-insensitive
+# name substrings or integer indices; the first that matches a connected input
+# device is used. Handy for a USB mic that isn't always plugged in:
+#   device_priority = ["USB", "default"]
+# Empty list (or key absent) keeps the plain `device` setting above.
+device_priority = []
 sample_rate = 16000
 window_seconds = 0.5
 

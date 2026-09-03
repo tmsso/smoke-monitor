@@ -10,6 +10,7 @@ import numpy as np
 import sounddevice as sd
 from pathlib import Path
 
+from audio_devices import describe_device, select_input_device
 from detector import SmokeDetector
 from notifier import Notifier
 
@@ -76,6 +77,22 @@ def run(config_path: str = "config.toml", testing: bool = False):
     sample_rate = config["audio"]["sample_rate"]
     window_size = int(sample_rate * config["audio"]["window_seconds"])
     device = resolve_device(config["audio"].get("device", ""))
+
+    # device_priority (ordered name substrings / indices) wins over the plain
+    # `device` setting. Empty/absent list → unchanged behavior.
+    priority = config["audio"].get("device_priority", []) or []
+    devices = sd.query_devices()
+    if priority:
+        picked = select_input_device(devices, priority)
+        if picked is not None:
+            device = picked[0]
+            logger.info("Selected input device %d: %s (matched device_priority)", *picked)
+        else:
+            logger.warning(
+                "No device_priority entry %s matched an input device — falling back to %s",
+                priority, describe_device(devices, device),
+            )
+
     cooldown_seconds = config["notification"]["cooldown_minutes"] * 60
     power_cooldown_seconds = config["notification"].get("power_loss_cooldown_minutes", 30) * 60
 
@@ -84,7 +101,7 @@ def run(config_path: str = "config.toml", testing: bool = False):
 
     logger.info(
         "Starting smoke monitor | device=%s | window=%.1fs | freq=%d-%dHz%s",
-        device or "default",
+        describe_device(devices, device),
         config["audio"]["window_seconds"],
         config["detection"]["freq_low_hz"],
         config["detection"]["freq_high_hz"],
