@@ -20,6 +20,19 @@ cp .env.example .env
 python -c "import sounddevice; print(sounddevice.query_devices())"
 ```
 
+**Picking a microphone.** Set `device` in `config.toml [audio]` to a name substring
+or index for a fixed mic. For a mic that isn't always connected (e.g. a USB mic),
+use `device_priority` instead — an ordered list of name substrings / indices, tried
+in order, first connected match wins:
+
+```toml
+[audio]
+device_priority = ["USB", "default"]   # USB mic if present, else system default
+```
+
+`device_priority` is checked before `device`; an empty list falls back to `device`.
+The chosen device name and index are logged at startup.
+
 **Run manually:**
 ```bash
 python monitor.py            # .env is loaded automatically
