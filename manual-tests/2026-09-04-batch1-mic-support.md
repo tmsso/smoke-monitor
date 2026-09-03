@@ -51,12 +51,17 @@ can play a ~3.2 kHz tone (or use `--play-tone` on this machine's speakers).
    - no restart of the process required
 
 **HP-2 — replug a higher-priority mic → switches back**
-1. Continue from HP-1 (running on the fallback mic).
+1. Continue from HP-1 (running on the fallback mic). Note the device **index**
+   in the current `Listening on <N>: …` line.
 2. Plug the USB mic back in. Wait up to `device_poll_seconds` (30 s).
 3. **Expect:**
    - log `Higher-priority input device available: <N> <USB mic> — switching`
    - **one** low-priority ntfy: "Smoke monitor switched microphone to …"
    - `Listening on <N>: <USB mic>` again
+4. Record the fallback index from step 1 and the post-switch index here. ALSA can
+   renumber devices when a USB device appears/disappears; `better_device` compares
+   the integer index captured at open time, so a renumber could in theory cause a
+   wrong target or a switch/switch-back loop. Watch for repeated "switching" lines.
 
 **HP-3 — no spurious reconnects on a healthy mic**
 1. Any single healthy mic, `device_priority` matching it. Start and leave for ~5 min.
