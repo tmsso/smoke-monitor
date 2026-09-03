@@ -37,6 +37,38 @@ def select_input_device(devices, priority):
     return None
 
 
+def better_device(devices, priority, current_index):
+    """Return (index, name) if the top `priority` match is a *different* device
+    than the one currently in use, else None.
+
+    Used to hot-switch to a higher-priority mic that was plugged in after start.
+    `current_index` is the index of the running device, or None if it isn't one
+    of the enumerated devices (e.g. running on the plain `device` fallback).
+    """
+    picked = select_input_device(devices, priority)
+    if picked is None or picked[0] == current_index:
+        return None
+    return picked
+
+
+def diagnose_stream(now, last_window_ts, consecutive_silent_windows,
+                    stall_seconds, silence_windows_limit):
+    """Verdict on a running input stream: 'ok', 'stalled', or 'silent'.
+
+    - 'stalled': no audio window has arrived for `stall_seconds` — the stream is
+      alive as an object but the device stopped delivering (typical on unplug
+      when PortAudio doesn't raise).
+    - 'silent': windows are arriving but all-zero for `silence_windows_limit`
+      consecutive windows — a muted or half-dead device. `silence_windows_limit`
+      of 0 or less disables this check.
+    """
+    if last_window_ts is not None and now - last_window_ts > stall_seconds:
+        return "stalled"
+    if silence_windows_limit > 0 and consecutive_silent_windows >= silence_windows_limit:
+        return "silent"
+    return "ok"
+
+
 def describe_device(devices, device):
     """Human-readable 'index: name' for a resolved device setting, for logging.
 

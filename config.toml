@@ -11,6 +11,14 @@ device = ""
 device_priority = []
 sample_rate = 16000
 window_seconds = 0.5
+# Hotplug recovery: if the active mic stops delivering audio, or delivers only
+# pure silence for this many seconds, close the stream and reconnect on the best
+# available device. Set to 0 to disable the silence trigger (a full stall is
+# always detected). A low-priority ntfy is sent on every loss/recovery/switch.
+hotplug_silence_seconds = 60
+# While running, re-check device_priority this often so plugging in a
+# higher-priority mic switches over without a restart.
+device_poll_seconds = 30
 
 [detection]
 # Frequency band to watch (Hz). Most smoke detectors beep at 3100-3400 Hz.

@@ -10,9 +10,21 @@ import numpy as np
 import sounddevice as sd
 from pathlib import Path
 
-from audio_devices import describe_device, select_input_device
+from audio_devices import (
+    better_device,
+    describe_device,
+    diagnose_stream,
+    select_input_device,
+)
 from detector import SmokeDetector
 from notifier import Notifier
+
+# No audio window for this long ⇒ the device stopped delivering (unplug that
+# PortAudio didn't raise on). ~10 missed 0.5 s windows; not user-configurable.
+STREAM_STALL_SECONDS = 5.0
+# How often the supervised loop re-checks the priority list for a better mic
+# and how often it retries opening a device after a loss.
+DEVICE_RETRY_SECONDS = 5.0
 
 logging.basicConfig(
     level=logging.INFO,
@@ -81,27 +93,51 @@ def run(config_path: str = "config.toml", testing: bool = False):
     # device_priority (ordered name substrings / indices) wins over the plain
     # `device` setting. Empty/absent list → unchanged behavior.
     priority = config["audio"].get("device_priority", []) or []
-    devices = sd.query_devices()
-    if priority:
-        picked = select_input_device(devices, priority)
-        if picked is not None:
-            device = picked[0]
-            logger.info("Selected input device %d: %s (matched device_priority)", *picked)
-        else:
+
+    def pick_device():
+        """Resolve the device to open now and the fresh device list: the top
+        `device_priority` match if any, else the plain `device` setting."""
+        devs = sd.query_devices()
+        if priority:
+            picked = select_input_device(devs, priority)
+            if picked is not None:
+                return picked[0], devs
             logger.warning(
                 "No device_priority entry %s matched an input device — falling back to %s",
-                priority, describe_device(devices, device),
+                priority, describe_device(devs, device),
             )
+        return device, devs
+
+    current_device, devices = pick_device()
 
     cooldown_seconds = config["notification"]["cooldown_minutes"] * 60
     power_cooldown_seconds = config["notification"].get("power_loss_cooldown_minutes", 30) * 60
 
+    window_seconds = config["audio"]["window_seconds"]
+    hotplug_silence_seconds = config["audio"].get("hotplug_silence_seconds", 60)
+    silence_windows_limit = int(hotplug_silence_seconds / window_seconds) if hotplug_silence_seconds > 0 else 0
+    device_poll_seconds = config["audio"].get("device_poll_seconds", 30)
+
     last_alert_time = 0.0
     audio_queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=16)
 
+    # Shared, coarse stream-health signals: the audio callback stamps when a
+    # window last arrived; process_loop publishes the run of all-zero windows.
+    # Single-writer each, read by the supervisor — GIL-atomic, no lock needed.
+    class _Health:
+        last_window_ts = None
+        consecutive_silent = 0
+
+        @classmethod
+        def reset(cls):
+            cls.last_window_ts = time.monotonic()
+            cls.consecutive_silent = 0
+
+    health = _Health
+
     logger.info(
         "Starting smoke monitor | device=%s | window=%.1fs | freq=%d-%dHz%s",
-        describe_device(devices, device),
+        describe_device(devices, current_device),
         config["audio"]["window_seconds"],
         config["detection"]["freq_low_hz"],
         config["detection"]["freq_high_hz"],
@@ -111,6 +147,7 @@ def run(config_path: str = "config.toml", testing: bool = False):
     def audio_callback(indata, frames, time_info, status):
         if status:
             logger.warning("Audio status: %s", status)
+        health.last_window_ts = time.monotonic()
         try:
             audio_queue.put_nowait(indata[:, 0].copy())
         except queue.Full:
@@ -131,6 +168,7 @@ def run(config_path: str = "config.toml", testing: bool = False):
             # for "all quiet" — otherwise a muted mic never alerts and looks healthy.
             if not np.any(samples):
                 silent_windows += 1
+                health.consecutive_silent = silent_windows
                 if silent_windows >= silence_warn_after and not silence_warned:
                     logger.warning(
                         "Microphone appears muted or disconnected — %.0fs of pure "
@@ -143,6 +181,7 @@ def run(config_path: str = "config.toml", testing: bool = False):
                 if silence_warned:
                     logger.warning("Microphone signal restored — resuming detection")
                 silent_windows = 0
+                health.consecutive_silent = 0
                 silence_warned = False
             if detector.process_window(samples.astype(np.float32)):
                 now = time.monotonic()
@@ -237,21 +276,109 @@ def run(config_path: str = "config.toml", testing: bool = False):
     heartbeat_worker = threading.Thread(target=heartbeat_loop, daemon=True)
     heartbeat_worker.start()
 
-    with sd.InputStream(
-        samplerate=sample_rate,
-        blocksize=window_size,
-        device=device,
-        channels=1,
-        dtype="float32",
-        latency="high",
-        callback=audio_callback,
-    ):
-        logger.info("Listening… press Ctrl+C to stop")
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            logger.info("Stopped by user")
+    def open_stream(dev):
+        return sd.InputStream(
+            samplerate=sample_rate,
+            blocksize=window_size,
+            device=dev,
+            channels=1,
+            dtype="float32",
+            latency="high",
+            callback=audio_callback,
+        )
+
+    def supervise_stream():
+        """Keep an input stream alive across device loss and hot-swaps.
+
+        Replaces the old single `with sd.InputStream` block: on a lost device
+        (stream error, a stall, or a long run of all-zero windows) it closes
+        the stream, re-enumerates every few seconds, and reopens on the best
+        available device; while healthy it re-checks `device_priority` every
+        `device_poll_seconds` and switches to a higher-priority mic if one
+        appeared. Every loss / recovery / switch sends a low-priority ntfy.
+        """
+        nonlocal current_device
+        announced_loss = False
+        while not stop_event.is_set():
+            try:
+                stream = open_stream(current_device)
+            except Exception as e:
+                logger.error(
+                    "Could not open input device %s: %s — retrying in %.0fs",
+                    describe_device(sd.query_devices(), current_device), e, DEVICE_RETRY_SECONDS,
+                )
+                if not announced_loss:
+                    notifier.send(
+                        message=f"Smoke monitor lost its microphone ({e}). Retrying…",
+                        title="Mic offline", tags="microphone,warning", priority="low",
+                    )
+                    announced_loss = True
+                if stop_event.wait(DEVICE_RETRY_SECONDS):
+                    break
+                current_device, _ = pick_device()
+                continue
+
+            with stream:
+                health.reset()
+                reset_ts = health.last_window_ts
+                confirmed_healthy = False
+                desc = describe_device(sd.query_devices(), current_device)
+                logger.info("Listening on %s… press Ctrl+C to stop", desc)
+
+                last_poll = time.monotonic()
+                while not stop_event.is_set():
+                    if stop_event.wait(1):
+                        break
+                    now = time.monotonic()
+                    # First window on a fresh stream ⇒ the device really works;
+                    # only then announce a recovery (avoids flapping on a device
+                    # that opens but delivers nothing).
+                    if not confirmed_healthy and health.last_window_ts != reset_ts:
+                        confirmed_healthy = True
+                        if announced_loss:
+                            logger.warning("Input device recovered: %s", desc)
+                            notifier.send(
+                                message=f"Smoke monitor microphone is back ({desc}).",
+                                title="Mic online", tags="microphone,white_check_mark",
+                                priority="low",
+                            )
+                            announced_loss = False
+                    verdict = diagnose_stream(
+                        now, health.last_window_ts, health.consecutive_silent,
+                        STREAM_STALL_SECONDS, silence_windows_limit,
+                    )
+                    if verdict != "ok":
+                        logger.warning(
+                            "Input device %s looks lost (%s) — reconnecting", desc, verdict,
+                        )
+                        if not announced_loss:
+                            notifier.send(
+                                message=f"Smoke monitor lost its microphone ({verdict}). Reconnecting…",
+                                title="Mic offline", tags="microphone,warning", priority="low",
+                            )
+                            announced_loss = True
+                        current_device, _ = pick_device()
+                        break
+                    if priority and now - last_poll >= device_poll_seconds:
+                        last_poll = now
+                        current_index = current_device if isinstance(current_device, int) else None
+                        upgrade = better_device(sd.query_devices(), priority, current_index)
+                        if upgrade is not None:
+                            logger.info(
+                                "Higher-priority input device available: %d %s — switching",
+                                *upgrade,
+                            )
+                            notifier.send(
+                                message=f"Smoke monitor switched microphone to {upgrade[1]}.",
+                                title="Mic switched", tags="microphone", priority="low",
+                            )
+                            current_device = upgrade[0]
+                            break
+
+    try:
+        supervise_stream()
+    except KeyboardInterrupt:
+        logger.info("Stopped by user")
     stop_event.set()
     audio_queue.put(None)
     worker.join()

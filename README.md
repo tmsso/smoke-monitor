@@ -33,6 +33,15 @@ device_priority = ["USB", "default"]   # USB mic if present, else system default
 `device_priority` is checked before `device`; an empty list falls back to `device`.
 The chosen device name and index are logged at startup.
 
+**Hotplug recovery.** The audio stream runs under a supervisor: if the mic stops
+delivering audio (unplugged, driver hiccup) or delivers only pure silence for
+`hotplug_silence_seconds` (default 60), the stream is closed and reopened on the
+best available device. While running, `device_priority` is re-checked every
+`device_poll_seconds` (default 30) so plugging in a higher-priority mic switches
+over without a restart. Every loss, recovery, and switch sends a low-priority
+ntfy notification. Set `hotplug_silence_seconds = 0` to disable the silence
+trigger (a full stall is still detected).
+
 **Run manually:**
 ```bash
 python monitor.py            # .env is loaded automatically
