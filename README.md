@@ -76,6 +76,26 @@ python monitor.py --dashboard
 python monitor.py --play-tone 30
 ```
 
+## Event recording
+
+Set `[recording] enabled = true` in `config.toml` to save a WAV around every
+confirmed detection. Each clip includes `pre_seconds` of audio from *before*
+the alarm confirmed (a rolling in-memory pre-buffer) plus `post_seconds` after:
+
+```toml
+[recording]
+enabled = false
+dir = "recordings"        # created on first write; git-ignored
+max_files = 50            # oldest files past this are deleted
+pre_seconds = 5
+post_seconds = 10
+```
+
+Files are named `YYYYmmdd-HHMMSS-hit.wav` (mono, 16-bit, `sample_rate` Hz). A
+sustained alarm produces one file, not one per window — a new clip only starts
+once confirmation has dropped and re-triggered. When `enabled = false` nothing
+is buffered or written.
+
 ## Install as systemd service
 
 ```bash
