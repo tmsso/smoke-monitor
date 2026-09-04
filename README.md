@@ -64,6 +64,18 @@ end-to-end check through the actual mic. `--test` fires on a single in-band
 window; a non-`--test` run needs sustained tone across the confirmation window,
 so `--play-tone`'s beep/gap cadence drives `--test` but not a full run.
 
+**Live tuning dashboard.** `--dashboard` shows a terminal UI (needs `rich`;
+works over SSH), refreshed per window: the band-energy ratio as a meter with
+the threshold marked, dominant frequency, per-window hit/miss, the rolling
+confirmation state (`hits/seen, need N`), the active input device and the
+input-overflow count. No notifications — a tuning aid, not a run mode.
+
+```bash
+python monitor.py --dashboard
+# in another terminal, drive it:
+python monitor.py --play-tone 30
+```
+
 ## Install as systemd service
 
 ```bash
