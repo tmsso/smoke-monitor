@@ -30,10 +30,11 @@ config change means setting off the real alarm — it's loud and drains its
 battery. After this batch, tuning happens on screen with recorded or
 synthetic audio, and swapping in a USB mic requires no config surgery.
 
-Status: device priority, hotplug handling, and the synthetic tone shipped
-(PRs #3–#5); physical USB-mic / speaker-coupling checks are in
-`manual-tests/2026-09-04-batch1-mic-support.md`. Still open: live tuning
-dashboard, event recorder, replay mode.
+Status: **complete** (PRs #3–#5, #11–#13). Hardware-dependent acceptance
+checks — USB-mic swap, speaker→mic coupling, and the dashboard meter under a
+real 3.2 kHz source — are offline-verified (injected-fake unit tests + a
+functional pass) and listed for a physical run in
+`manual-tests/2026-09-04-batch1-mic-support.md`.
 
 - ~~**Device priority list**~~ — *done (PR #3).* In `config.toml [audio]`, add
   `device_priority = []`: an ordered list of device name substrings or
@@ -57,7 +58,7 @@ dashboard, event recorder, replay mode.
   This subsumes the old "microphone disconnect detection" item.
   *Done when:* yanking the USB mic mid-run recovers to the internal mic
   without a restart and sends one notification; replugging switches back.
-- **Live tuning dashboard** (`--dashboard`) — a terminal UI (use `rich`;
+- ~~**Live tuning dashboard**~~ (`--dashboard`) — *done (PR #11).* A terminal UI (use `rich`;
   must work over SSH) refreshed per window showing: band energy ratio as
   a meter with the threshold marked, dominant frequency (Hz), hit/miss
   verdict, rolling confirmation state (e.g. `3/8, need 5`), active input
@@ -67,6 +68,8 @@ dashboard, event recorder, replay mode.
   keep the bool API for callers via a thin wrapper if simpler.
   *Done when:* running `--dashboard` next to a phone playing a 3.2 kHz
   tone visibly moves the meter past the threshold and counts hits.
+  (`analyze_window` → `WindowMetrics`; render tested; meter-past-threshold
+  under a real tone is manual-sheet `DASH-1`.)
 - ~~**Synthetic alarm tone**~~ (`--play-tone`) — *done (PR #5).* Play an alarm-like beep
   pattern through the speakers via `sounddevice.play`: default 3200 Hz
   square-ish tone in T3 cadence (3 × 0.5 s beeps with 0.5 s gaps, 1.5 s
@@ -77,7 +80,7 @@ dashboard, event recorder, replay mode.
   `--test` for end-to-end verification without the real alarm.
   *Done when:* `--play-tone` in one terminal drives `--test` mode in
   another to a detection through the actual mic.
-- **Event recorder** — new `[recording]` config section:
+- ~~**Event recorder**~~ — *done (PR #12).* New `[recording]` config section:
   `enabled = false`, `dir = "recordings"`, `max_files = 50`,
   `pre_seconds = 5`, `post_seconds = 10`. When enabled, keep a rolling
   pre-buffer (see Batch 2 — implement the buffer here, Batch 2 reuses it)
@@ -87,7 +90,10 @@ dashboard, event recorder, replay mode.
   Use the stdlib `wave` module.
   *Done when:* a detection produces a WAV containing audio from before
   the trigger, and the directory never exceeds `max_files`.
-- **Replay mode** (`--replay path.wav`) — run the detector offline over a
+  (Buffer sized for `pre_seconds` only — Batch 2 resizes it to
+  `listen_in_seconds` and decouples the fill from `enabled`. One file per
+  event, not per window: capture re-arms only after confirmation drops.)
+- ~~**Replay mode**~~ (`--replay path.wav`) — *done (PR #13).* Run the detector offline over a
   WAV file (resample not required; reject files whose sample rate differs
   from `[audio] sample_rate` with a clear error). Print one line per
   window: time offset, band ratio, dominant frequency, hit/miss, and
@@ -95,7 +101,7 @@ dashboard, event recorder, replay mode.
   No audio stream, no notifications.
   *Done when:* replaying a recorded alarm event reproduces the detection
   and replaying ambient noise does not; threshold changes in
-  `config.toml` visibly change the outcome.
+  `config.toml` visibly change the outcome. (Fully offline-verified.)
 
 ## Batch 2 — Listen-in on ambiguous signals
 
