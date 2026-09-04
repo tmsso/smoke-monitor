@@ -38,6 +38,17 @@ def test_tone_window_is_a_hit_with_dominant_in_band():
     assert 3000 <= m.dominant_hz <= 3600
 
 
+def test_dominant_hz_ignores_dc_and_rumble_in_a_quiet_window():
+    # A near-silent window with a strong DC offset + a faint 3.2 kHz tone: the
+    # reported dominant should be the audible tone, not 0 Hz.
+    rng = np.random.default_rng(3)
+    t = np.arange(WIN) / SR
+    w = (0.4 + 0.01 * np.sin(2 * np.pi * 3200 * t)
+         + rng.standard_normal(WIN) * 1e-4).astype(np.float32)
+    m = SmokeDetector(_config()).analyze_window(w)
+    assert m.dominant_hz > 100.0
+
+
 def test_noise_window_is_a_miss():
     m = SmokeDetector(_config()).analyze_window(_noise_window())
     assert m.hit is False
