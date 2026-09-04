@@ -62,7 +62,11 @@ class SmokeDetector:
         else:
             band_mask = (freqs >= self.freq_low) & (freqs <= self.freq_high)
             ratio = float(np.sum(power[band_mask]) / total_energy)
-            dominant_hz = float(freqs[int(np.argmax(power))])
+            # Ignore DC / sub-audible rumble when picking the dominant tone —
+            # otherwise a quiet room reports 0 Hz, which is useless for tuning.
+            audible = power.copy()
+            audible[freqs < 100.0] = 0.0
+            dominant_hz = float(freqs[int(np.argmax(audible))]) if np.any(audible) else 0.0
 
         hit = ratio >= self.energy_threshold
 
@@ -100,12 +104,3 @@ class SmokeDetector:
         spectrum = np.abs(np.fft.rfft(windowed))
         freqs = np.fft.rfftfreq(len(samples), d=1.0 / self.sample_rate)
         return freqs, spectrum**2
-
-    def _band_energy_ratio(self, samples: np.ndarray) -> float:
-        """Fraction of spectral energy falling in the alarm band (0.0-1.0)."""
-        freqs, power = self._spectrum(samples)
-        total_energy = np.sum(power)
-        if total_energy == 0:
-            return 0.0
-        band_mask = (freqs >= self.freq_low) & (freqs <= self.freq_high)
-        return float(np.sum(power[band_mask]) / total_energy)
