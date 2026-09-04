@@ -30,6 +30,15 @@ energy_ratio_threshold = 0.35
 confirm_windows = 5
 confirm_out_of = 8
 
+[recording]
+# Save a WAV around every confirmed detection, including a few seconds from
+# before the alarm confirmed (rolling pre-buffer). Off by default.
+enabled = false
+dir = "recordings"
+max_files = 50      # oldest files beyond this are deleted
+pre_seconds = 5     # audio kept from before the trigger
+post_seconds = 10   # audio kept after the trigger
+
 [notification]
 # ntfy_topic is loaded from the NTFY_TOPIC environment variable (see .env.example).
 # Override for self-hosted ntfy instance.

@@ -120,6 +120,30 @@ can play a ~3.2 kHz tone (or use `--play-tone` on this machine's speakers).
 
 ---
 
+## REC — event recorder (PR #12)
+
+**REC-1 — a real detection writes a clip with pre-trigger audio**
+1. In `config.toml`: `[recording] enabled = true`, `pre_seconds = 5`,
+   `post_seconds = 10`, `dir = "recordings"`.
+2. Start the monitor (service or manual). Confirm the startup log line
+   `Event recorder on → recordings (pre 5s / post 10s, keep 50)`.
+3. Set off the real alarm (or hold a phone playing a sustained 3.2 kHz tone at
+   the mic long enough to confirm — ~4 s).
+4. **Expect:** after the alarm, log `Recorded recordings/YYYYmmdd-HHMMSS-hit.wav
+   (~15.xs)`; the file plays back as mono 16 kHz and its first few seconds are
+   the room audio from *before* the alarm confirmed.
+
+**REC-2 — directory is capped at `max_files`**
+1. `max_files = 3`, recording enabled.
+2. Trigger 5 separate detection events (let confirmation drop between each).
+3. **Expect:** `recordings/` holds exactly 3 WAVs, the 3 most recent.
+
+**REC-3 — disabled is inert**
+1. `enabled = false`. Start, run through a detection.
+2. **Expect:** no `recordings/` directory is created, no "Recorded" log line.
+
+---
+
 ## Notes / known gotchas
 
 - On this host the internal analog capture is exposed through the ALSA `default` /

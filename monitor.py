@@ -18,6 +18,7 @@ from audio_devices import (
 )
 from detector import SmokeDetector
 from notifier import Notifier
+from recorder import Recorder
 
 # No audio window for this long ⇒ the device stopped delivering (unplug that
 # PortAudio didn't raise on). ~10 missed 0.5 s windows; not user-configurable.
@@ -85,6 +86,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
     config = load_config(config_path)
     detector = SmokeDetector(config, testing=testing)
     notifier = Notifier(config)
+    recorder = Recorder(config)
 
     sample_rate = config["audio"]["sample_rate"]
     window_size = int(sample_rate * config["audio"]["window_seconds"])
@@ -195,7 +197,10 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
                     logger.warning("Microphone signal restored — resuming detection")
                 health.consecutive_silent = 0
                 silence_warned = False
-            if detector.process_window(samples.astype(np.float32)):
+            frame = samples.astype(np.float32)
+            confirmed = detector.process_window(frame)
+            recorder.feed(frame, confirmed)
+            if confirmed:
                 now = time.monotonic()
                 if now - last_alert_time >= cooldown_seconds:
                     last_alert_time = now
