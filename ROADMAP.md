@@ -30,11 +30,20 @@ config change means setting off the real alarm — it's loud and drains its
 battery. After this batch, tuning happens on screen with recorded or
 synthetic audio, and swapping in a USB mic requires no config surgery.
 
-Status: **complete** (PRs #3–#5, #11–#13). Hardware-dependent acceptance
-checks — USB-mic swap, speaker→mic coupling, and the dashboard meter under a
-real 3.2 kHz source — are offline-verified (injected-fake unit tests + a
-functional pass) and listed for a physical run in
-`manual-tests/2026-09-04-batch1-mic-support.md`.
+Status: **code complete — NOT yet deployed or hardware-checked.** All items
+are implemented and merged (PRs #3–#5, #11–#13, #15) with passing unit +
+functional tests, but:
+1. **Not live.** The `smoke-monitor` service has been running since
+   2026-07-13 and predates every Batch 1 merge. Deploy: `git pull` →
+   `.venv/bin/pip install -r requirements.txt` (rich, new in #11) →
+   `sudo systemctl restart smoke-monitor` → check `journalctl`. (The
+   sessions that built this could not run `sudo`.)
+2. **Physical checks pending.** USB-mic swap, speaker→mic coupling, and the
+   dashboard meter under a real 3.2 kHz source are offline-verified only
+   (injected-fake unit tests + functional passes); run
+   `manual-tests/2026-09-04-batch1-mic-support.md` (`DP/HP/PT/DASH/REC/RP`).
+
+Do both before treating Batch 2 as started.
 
 - ~~**Device priority list**~~ — *done (PR #3).* In `config.toml [audio]`, add
   `device_priority = []`: an ordered list of device name substrings or
