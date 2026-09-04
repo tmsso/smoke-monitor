@@ -76,6 +76,17 @@ python monitor.py --dashboard
 python monitor.py --play-tone 30
 ```
 
+**Replay a recording.** `--replay path.wav` runs the detector over a saved WAV
+(e.g. one written by the event recorder) and prints the per-window band ratio,
+dominant frequency and hit/miss, then whether the alarm would have fired — no
+stream, no notifications. The WAV's sample rate must match `[audio] sample_rate`
+(no resampling). Edit `energy_ratio_threshold` / the band in `config.toml` and
+re-run to see a tuning change land:
+
+```bash
+python monitor.py --replay recordings/20260904-143012-hit.wav
+```
+
 ## Event recording
 
 Set `[recording] enabled = true` in `config.toml` to save a WAV around every

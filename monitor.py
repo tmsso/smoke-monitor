@@ -444,11 +444,20 @@ if __name__ == "__main__":
              "hit/miss and confirmation state in a terminal UI (needs `rich`). "
              "No notifications.",
     )
+    parser.add_argument(
+        "--replay", metavar="PATH",
+        help="Run the detector offline over a WAV file and print the per-window "
+             "metrics and final verdict. No stream, no notifications.",
+    )
     args = parser.parse_args()
     load_dotenv()
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
-    if args.dashboard:
+    if args.replay:
+        from replay import replay_file
+
+        raise SystemExit(replay_file(args.replay, load_config(args.config)))
+    elif args.dashboard:
         from dashboard import run_dashboard
 
         run_dashboard(args.config)

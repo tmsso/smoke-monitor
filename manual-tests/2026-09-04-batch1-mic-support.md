@@ -144,6 +144,20 @@ can play a ~3.2 kHz tone (or use `--play-tone` on this machine's speakers).
 
 ---
 
+## RP — offline replay (PR #13)
+
+Fully covered by `pytest tests/test_replay.py` (verdict, sample-rate rejection,
+threshold sensitivity, CLI exit codes). Optional real-data cross-check:
+
+**RP-1 — replay a real recorded event**
+1. With `[recording] enabled = true`, capture a real alarm (REC-1).
+2. `python monitor.py --replay recordings/<that-file>.wav`.
+3. **Expect:** per-window lines with `ratio` well above `0.35` during the alarm
+   and `alarm would have fired at t=<onset + ~4s>`. Raise `energy_ratio_threshold`
+   to `0.99` in `config.toml`, re-run → `no alarm`.
+
+---
+
 ## Notes / known gotchas
 
 - On this host the internal analog capture is exposed through the ALSA `default` /
