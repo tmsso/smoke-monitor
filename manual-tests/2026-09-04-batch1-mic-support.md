@@ -98,6 +98,28 @@ can play a ~3.2 kHz tone (or use `--play-tone` on this machine's speakers).
 
 ---
 
+## DASH — live tuning dashboard (PR #11)
+
+**DASH-1 — meter crosses the threshold on a real tone**
+1. `sudo systemctl stop smoke-monitor` (frees the mic; a shared capture also works
+   but stop it for a clean read).
+2. Terminal A: `python monitor.py --dashboard`
+3. Terminal B: `python monitor.py --play-tone 30` — or hold a phone playing a
+   ~3.2 kHz tone close to the mic (laptop speakers alone were too quiet on this
+   host to cross the threshold).
+4. **Expect (Terminal A):** on the beeps the `band ratio` meter fills past the
+   `┃` threshold mark, `verdict` shows `HIT`, `dominant` reads ~3200 Hz, and
+   `confirmation` climbs (e.g. `5/8, need 5`); with a sustained enough tone the
+   panel title flips to `SMOKE ALARM CONFIRMED`. No notification is sent.
+5. `sudo systemctl start smoke-monitor` when done.
+
+**DASH-2 — works over SSH**
+1. From another machine, `ssh` in and run `python monitor.py --dashboard`.
+2. **Expect:** the panel renders and refreshes in place (no scrolling spam),
+   readable over the SSH session. `Ctrl+C` exits cleanly with `Dashboard stopped`.
+
+---
+
 ## Notes / known gotchas
 
 - On this host the internal analog capture is exposed through the ALSA `default` /

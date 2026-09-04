@@ -433,11 +433,21 @@ if __name__ == "__main__":
         "--tone-hz", type=float, default=None, metavar="HZ",
         help="Frequency for --play-tone (default 3200)",
     )
+    parser.add_argument(
+        "--dashboard", action="store_true",
+        help="Live tuning dashboard: per-window band ratio, dominant Hz, "
+             "hit/miss and confirmation state in a terminal UI (needs `rich`). "
+             "No notifications.",
+    )
     args = parser.parse_args()
     load_dotenv()
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
-    if args.play_tone is not False:
+    if args.dashboard:
+        from dashboard import run_dashboard
+
+        run_dashboard(args.config)
+    elif args.play_tone is not False:
         from tone import DEFAULT_HZ, DEFAULT_SECONDS, play_tone
 
         seconds = args.play_tone if args.play_tone is not None else DEFAULT_SECONDS
