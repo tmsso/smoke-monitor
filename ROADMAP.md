@@ -48,25 +48,24 @@ that is a runnable command or test**. Conventions:
 
 ## Owner-only steps (do these before the next long-batch run)
 
-- **O-1 Deploy what's merged.** The service has run unchanged since
+- **O-1 Use a high-entropy ntfy topic — do now.** ntfy.sh topics are
+  unauthenticated: the topic name is the only secret, and anyone who knows
+  it can read alerts *and* publish fake ones. Generate one with
+  `python -c "import secrets; print(secrets.token_urlsafe(18))"`, update
+  `.env` and the phone subscription, then `chmod 600 .env`. Required
+  before Batch 2 (which would put room audio on that topic).
+- **O-2 Deploy what's merged.** The service has run unchanged since
   2026-07-13; nothing since Batch 1 is live. `git pull` →
   `.venv/bin/pip install -r requirements.txt` →
   `sudo systemctl restart smoke-monitor` → read `journalctl -u
   smoke-monitor -n 40`. Expect new behavior after deploy: low-priority
   "Mic offline/online/switched" pushes from hotplug handling.
-- **O-2 Run the Batch 1 manual sheet**
-  (`manual-tests/2026-09-04-batch1-mic-support.md`).
 - **O-3 Record the real alarm once.** Set `[recording] enabled = true`,
   press the alarm's test button, keep the WAV locally (never commit it).
   It is the ground truth for D-1 and Batch 3 — every detection-tuning
   claim so far rests on synthetic signals.
-- **O-4 Use a high-entropy ntfy topic.** ntfy.sh topics are
-  unauthenticated: the topic name is the only secret, and anyone who knows
-  it can read alerts *and* publish fake ones. Generate one with
-  `python -c "import secrets; print(secrets.token_urlsafe(18))"`, never
-  derive it from the hostname or project name, update `.env` and the phone
-  subscription. Required before Batch 2 (which would put room audio on
-  that topic). Also `chmod 600 .env`.
+- **O-4 Run the Batch 1 manual sheet**
+  (`manual-tests/2026-09-04-batch1-mic-support.md`).
 
 ## Decisions needed (recommended default in **bold**)
 
@@ -83,7 +82,7 @@ that is a runnable command or test**. Conventions:
   one-time `loginctl enable-linger`). Removes `sudo` from redeploys, which
   also means agent sessions could restart the service themselves — a new
   autonomous capability. **Keep the system unit for now**; revisit if
-  manual redeploys keep lagging (see O-1).
+  manual redeploys keep lagging (see O-2).
 - **D-5 Listen-in security bar** (Batch 2). **Ship listen-in only with all
   of: H-7 token support, a separate high-entropy command topic, a rate
   limit, and a visible audit notification for every request.**
@@ -318,7 +317,7 @@ H-8 (after D-1), H-9, H-12, H-10, H-13, H-11 last (owner installs it).
 Goal: when the detector isn't sure — or the human isn't — deliver the
 actual audio to the phone instead of forcing a guess.
 
-Prerequisites: H-2 (attachments go through the sender thread), H-7, O-4,
+Prerequisites: H-2 (attachments go through the sender thread), H-7, O-1,
 and D-1 decided (the near-miss definition depends on the history length).
 
 - **Rolling pre-buffer** — move the deque out of `Recorder` into a small
