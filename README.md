@@ -122,6 +122,12 @@ sudo journalctl -u smoke-monitor -f
 1. Install the [ntfy app](https://ntfy.sh) on your phone
 2. Subscribe to the topic you set as `NTFY_TOPIC` in `.env` — use a long random
    string: ntfy.sh topics have no password, the name is the only secret
+3. Optional, stronger: reserve the topic with an ntfy account (or self-host ntfy
+   with access control) and put an access token in `.env` as `NTFY_TOKEN`. The
+   monitor then sends `Authorization: Bearer <token>` on every request, so
+   knowing the topic name is no longer enough to read or fake alerts.
+
+The topic never appears in the service log: request URLs are not logged.
 
 ## Tuning
 

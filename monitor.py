@@ -32,6 +32,9 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
 )
 logger = logging.getLogger(__name__)
+# httpx logs every request URL at INFO, and the URL contains the secret ntfy
+# topic; Notifier logs its own URL-free line instead.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def load_config(path: str = "config.toml") -> dict:
