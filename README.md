@@ -110,7 +110,14 @@ is buffered or written.
 
 ## Install as systemd service
 
+First edit `User=` in `smoke-monitor.service` to the account that owns the
+checkout (`%h` in the unit is that account's home). The unit is sandboxed
+(`ProtectSystem=strict`, `ProtectHome=read-only`, …): the service can read its
+checkout but write only to `recordings/`, so create that directory before
+installing:
+
 ```bash
+mkdir -p recordings && chmod 700 recordings
 sudo cp smoke-monitor.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now smoke-monitor
