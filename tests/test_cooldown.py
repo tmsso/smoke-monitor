@@ -29,7 +29,7 @@ def test_inside_and_after_cooldown():
 def test_alarm_30s_after_boot_is_sent_once(monkeypatch):
     _patch(monkeypatch)
     sends = []
-    monkeypatch.setattr(monitor.Notifier, "send", lambda self, *a, **k: sends.append(k))
+    monkeypatch.setattr(monitor.Notifier, "send", lambda self, *a, **k: sends.append(k) or True)
     # Every window confirms, so the loop sees a confirmation ~20×/s.
     monkeypatch.setattr(monitor.SmokeDetector, "process_window", lambda self, x: True)
     # Pretend the machine booted 30 s ago: monotonic() reads 30.0 at start.

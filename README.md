@@ -2,7 +2,7 @@
 
 Listens to a microphone for smoke alarm sounds and sends a push notification via [ntfy.sh](https://ntfy.sh).
 
-Runs as a systemd service on an always-on PC. Conservative detection: requires 5 of 8 consecutive 0.5s audio windows to show dominant energy in the 3000–3600 Hz band before alerting. 10-minute cooldown between notifications.
+Runs as a systemd service on an always-on PC. Conservative detection: requires 5 of 8 consecutive 0.5s audio windows to show dominant energy in the 3000–3600 Hz band before alerting. Alerts are sent from a background thread and retried with backoff until delivered; a 10-minute cooldown starts once one gets through.
 
 ## Setup
 
