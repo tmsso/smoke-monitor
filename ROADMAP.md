@@ -55,7 +55,7 @@ that is a runnable command or test**. Conventions:
   `.env` and the phone subscription, then `chmod 600 .env`. Required
   before Batch 2 (which would put room audio on that topic).
 - ~~**O-2 Deploy what's merged**~~ — *done 2026-10-22 (Batch 1 live; Batch H
-  still needs its own deploy, see Batch H status).* The service has run unchanged since
+  deployed the same day, see Batch H status).* The service has run unchanged since
   2026-07-13; nothing since Batch 1 is live. `git pull` →
   `.venv/bin/pip install -r requirements.txt` →
   `sudo systemctl restart smoke-monitor` → read `journalctl -u
