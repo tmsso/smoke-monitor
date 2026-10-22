@@ -61,8 +61,9 @@ python monitor.py --play-tone --tone-hz 2900
 
 Run it in one terminal against `python monitor.py --test` in another for an
 end-to-end check through the actual mic. `--test` fires on a single in-band
-window; a non-`--test` run needs sustained tone across the confirmation window,
-so `--play-tone`'s beep/gap cadence drives `--test` but not a full run.
+window. A non-`--test` run needs 5 hits in 8 windows, and whether the T3
+beep/gap cadence gets there depends on how the beeps line up with the 0.5 s
+windows — so a full run may or may not confirm `--play-tone` (see ROADMAP H-8).
 
 **Live tuning dashboard.** `--dashboard` shows a terminal UI (needs `rich`;
 works over SSH), refreshed per window: the band-energy ratio as a meter with
@@ -119,7 +120,8 @@ sudo journalctl -u smoke-monitor -f
 ## Phone setup
 
 1. Install the [ntfy app](https://ntfy.sh) on your phone
-2. Subscribe to the topic you set in `config.toml`
+2. Subscribe to the topic you set as `NTFY_TOPIC` in `.env` — use a long random
+   string: ntfy.sh topics have no password, the name is the only secret
 
 ## Tuning
 
