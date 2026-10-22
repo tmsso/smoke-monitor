@@ -35,6 +35,21 @@ class Notifier:
             headers["Authorization"] = f"Bearer {token}"
         # `transport` lets tests swap in httpx.MockTransport; None = real network.
         self._client = httpx.Client(transport=transport, timeout=10, headers=headers)
+        # Separate, header-free client for dead-man's-switch pings: the ntfy
+        # token must never be sent to a third-party health-check service.
+        self._ping_client = httpx.Client(transport=transport, timeout=10)
+
+    def ping(self, url: str) -> bool:
+        """GET a health-check URL. The URL embeds that check's secret id, so
+        it's never logged."""
+        try:
+            self._ping_client.get(url).raise_for_status()
+            logger.debug("Health check ping sent")
+            return True
+        except Exception as e:
+            msg = str(e).replace(url, "<healthcheck-url>")
+            logger.warning("Health check ping failed: %s", msg)
+            return False
 
     def _redact(self, text: str) -> str:
         """The topic is the secret on ntfy.sh — keep it out of log lines
@@ -117,6 +132,11 @@ class AlertSender:
         """Queue a non-smoke notification (Notifier.send kwargs); one retry."""
         self._queue.put((1, next(self._seq), kwargs))
 
+    def ping(self, url: str) -> None:
+        """Queue a health-check ping. No retry: the next one is minutes away,
+        and a missed ping is exactly what the external check should notice."""
+        self._queue.put((1, next(self._seq), {"_ping": url}))
+
     def join(self, timeout: float | None = None):
         """Wake the worker and wait for it; call after setting stop_event."""
         self._queue.put((2, next(self._seq), None))
@@ -130,6 +150,8 @@ class AlertSender:
                 break
             if "_smoke" in item:
                 self._deliver_smoke(item["_smoke"])
+            elif "_ping" in item:
+                self._notifier.ping(item["_ping"])
             elif not self._notifier.send(**item):
                 if self._stop.wait(self._other_retry):
                     break

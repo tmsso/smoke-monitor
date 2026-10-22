@@ -98,12 +98,11 @@ def is_overflow_only(status) -> bool:
     )
 
 
-def heartbeat_status(stats: dict) -> tuple[str, str, str, str]:
-    """Build the heartbeat from health stats → (title, message, priority, tags).
+def health_problems(stats: dict) -> list[str]:
+    """Human-readable problems in a health snapshot; empty list = healthy.
 
     `stats` keys: device, windows, overflows, peak_ratio (all since the last
-    heartbeat), silent, stalled, worker_alive. Any problem turns the
-    heartbeat into a louder DEGRADED message instead of a blanket "OK".
+    report), silent, stalled, worker_alive.
     """
     problems = []
     if not stats["worker_alive"]:
@@ -114,6 +113,17 @@ def heartbeat_status(stats: dict) -> tuple[str, str, str, str]:
         problems.append("mic delivers pure silence (muted or unplugged?)")
     if stats["windows"] == 0:
         problems.append("no audio analysed since the last heartbeat")
+    return problems
+
+
+def heartbeat_status(stats: dict) -> tuple[str, str, str, str]:
+    """Build the heartbeat from health stats → (title, message, priority, tags).
+
+    `stats` keys: device, windows, overflows, peak_ratio (all since the last
+    heartbeat), silent, stalled, worker_alive. Any problem turns the
+    heartbeat into a louder DEGRADED message instead of a blanket "OK".
+    """
+    problems = health_problems(stats)
     details = (
         f"Mic: {stats['device']}. Since last heartbeat: {stats['windows']} windows "
         f"analysed, peak band ratio {stats['peak_ratio']:.2f}, "
@@ -233,6 +243,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
         # Since the last heartbeat (the heartbeat reads and zeroes them; a lost
         # increment in that race is irrelevant for a daily summary).
         windows_processed = 0
+        windows_total = 0  # never reset; the health-check ping diffs it
         peak_ratio = 0.0
         overflows = 0
         # Since the last hourly overflow log line.
@@ -315,6 +326,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
                 metrics = detector.analyze_window(frame)
                 confirmed = metrics.confirmed
                 health.windows_processed += 1
+                health.windows_total += 1
                 if metrics.ratio > health.peak_ratio:
                     health.peak_ratio = metrics.ratio
                 recorder.feed(frame, confirmed)
@@ -375,6 +387,38 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
                     logger.info("Power loss detected but in cooldown (%ds remaining)", remaining)
             previous_ac = ac_online
 
+    def health_snapshot(windows: int) -> dict:
+        """Current health as heartbeat_status()/health_problems() stats."""
+        last_ts = health.last_window_ts
+        return {
+            "device": health.device_desc,
+            "windows": windows,
+            "overflows": health.overflows,
+            "peak_ratio": health.peak_ratio,
+            "silent": health.consecutive_silent >= silence_warn_after,
+            "stalled": last_ts is None or time.monotonic() - last_ts > STREAM_STALL_SECONDS,
+            "worker_alive": worker.is_alive(),
+        }
+
+    def healthcheck_loop():
+        """Dead-man's switch: ping an external check (e.g. healthchecks.io)
+        while healthy. The external service alerts when pings *stop* — the
+        only way to hear about a dead laptop or a hung process."""
+        url = os.environ.get("HEALTHCHECK_URL", "")
+        if not url:
+            return
+        interval = config["notification"].get("healthcheck_interval_minutes", 5) * 60
+        logger.info("Health check pings enabled every %.0fs", interval)
+        last_total = health.windows_total
+        while not stop_event.wait(interval):
+            total = health.windows_total
+            problems = health_problems(health_snapshot(total - last_total))
+            last_total = total
+            if problems:
+                logger.warning("Health check ping skipped — degraded: %s", "; ".join(problems))
+            else:
+                sender.ping(url)
+
     def heartbeat_loop():
         notif = config["notification"]
         interval_hours = notif.get("heartbeat_interval_hours", 24)
@@ -397,16 +441,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
         interval = timedelta(hours=interval_hours)
         target = first
         while not wait_until(target, datetime.now, stop_event.wait):
-            last_ts = health.last_window_ts
-            stats = {
-                "device": health.device_desc,
-                "windows": health.windows_processed,
-                "overflows": health.overflows,
-                "peak_ratio": health.peak_ratio,
-                "silent": health.consecutive_silent >= silence_warn_after,
-                "stalled": last_ts is None or time.monotonic() - last_ts > STREAM_STALL_SECONDS,
-                "worker_alive": worker.is_alive(),
-            }
+            stats = health_snapshot(health.windows_processed)
             health.windows_processed = 0
             health.peak_ratio = 0.0
             health.overflows = 0
@@ -425,6 +460,9 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
 
     heartbeat_worker = threading.Thread(target=heartbeat_loop, daemon=True)
     heartbeat_worker.start()
+
+    healthcheck_worker = threading.Thread(target=healthcheck_loop, daemon=True)
+    healthcheck_worker.start()
 
     def open_stream(dev):
         return sd.InputStream(
@@ -568,6 +606,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
         worker.join(timeout=2)
         power_worker.join()
         heartbeat_worker.join()
+        healthcheck_worker.join()
         sender.join(timeout=5)
 
 
