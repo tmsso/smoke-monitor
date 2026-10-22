@@ -82,6 +82,25 @@ def _read_ac_online() -> bool | None:
         return None
 
 
+class WorkerDied(RuntimeError):
+    """The audio-processing thread died or stopped keeping up. run() raises it
+    so the process exits non-zero and systemd restarts it."""
+
+
+def worker_verdict(alive: bool, now: float, last_window_ts, last_processed_ts,
+                   stall_seconds: float) -> str:
+    """'ok', 'dead' (worker thread gone) or 'stuck' (windows still arrive but
+    none processed successfully for 2 × stall_seconds — hung, or failing on
+    every window). Pure, so tests can drive it."""
+    if not alive:
+        return "dead"
+    if last_window_ts is None or last_processed_ts is None:
+        return "ok"
+    if now - last_window_ts < stall_seconds and now - last_processed_ts > 2 * stall_seconds:
+        return "stuck"
+    return "ok"
+
+
 def cooldown_elapsed(last: float | None, now: float, seconds: float) -> bool:
     """True if an alert may fire: none sent yet, or `seconds` passed since `last`.
 
@@ -137,11 +156,12 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
     # Single-writer each, read by the supervisor — GIL-atomic, no lock needed.
     class _Health:
         last_window_ts = None
+        last_processed_ts = None
         consecutive_silent = 0
 
         @classmethod
         def reset(cls):
-            cls.last_window_ts = time.monotonic()
+            cls.last_window_ts = cls.last_processed_ts = time.monotonic()
             cls.consecutive_silent = 0
             # Discard windows captured before the reconnect: up to `maxsize`
             # stale all-zero frames could otherwise be drained by process_loop
@@ -181,42 +201,50 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
             samples = audio_queue.get()
             if samples is None:
                 break
-            # A muted or disconnected mic delivers exactly-zero samples; a live mic
-            # always carries some noise/DC offset. Warn so silence isn't mistaken
-            # for "all quiet" — otherwise a muted mic never alerts and looks healthy.
-            # health.consecutive_silent is the single source of truth for the run
-            # length: the supervisor zeroes it on reconnect, and we resume from
-            # whatever it holds so a reconnect actually restarts the count (rather
-            # than a stale local counter re-tripping the hotplug limit every cycle).
-            if not np.any(samples):
-                if health.consecutive_silent == 0:
-                    silence_warned = False  # fresh silent run (start or post-reconnect)
-                health.consecutive_silent += 1
-                if health.consecutive_silent >= silence_warn_after and not silence_warned:
-                    logger.warning(
-                        "Microphone appears muted or disconnected — %.0fs of pure "
-                        "silence. No smoke alarm can be detected! Check the mic mute "
-                        "(see README: Troubleshooting).",
-                        health.consecutive_silent * window_seconds,
-                    )
-                    silence_warned = True
-            else:
-                if silence_warned:
-                    logger.warning("Microphone signal restored — resuming detection")
-                health.consecutive_silent = 0
-                silence_warned = False
-            frame = samples.astype(np.float32)
-            confirmed = detector.process_window(frame)
-            recorder.feed(frame, confirmed)
-            if confirmed:
-                # Enqueue only — delivery, retries and the cooldown live on the
-                # sender thread so this loop never waits on the network.
-                outcome = sender.smoke()
-                if outcome == "queued":
-                    logger.warning("ALARM DETECTED — sending notification")
-                elif outcome == "cooldown":
-                    logger.info("Alarm detected but in cooldown (%ds remaining)",
-                                sender.cooldown_remaining())
+            try:
+                # A muted or disconnected mic delivers exactly-zero samples; a live mic
+                # always carries some noise/DC offset. Warn so silence isn't mistaken
+                # for "all quiet" — otherwise a muted mic never alerts and looks healthy.
+                # health.consecutive_silent is the single source of truth for the run
+                # length: the supervisor zeroes it on reconnect, and we resume from
+                # whatever it holds so a reconnect actually restarts the count (rather
+                # than a stale local counter re-tripping the hotplug limit every cycle).
+                if not np.any(samples):
+                    if health.consecutive_silent == 0:
+                        silence_warned = False  # fresh silent run (start or post-reconnect)
+                    health.consecutive_silent += 1
+                    if health.consecutive_silent >= silence_warn_after and not silence_warned:
+                        logger.warning(
+                            "Microphone appears muted or disconnected — %.0fs of pure "
+                            "silence. No smoke alarm can be detected! Check the mic mute "
+                            "(see README: Troubleshooting).",
+                            health.consecutive_silent * window_seconds,
+                        )
+                        silence_warned = True
+                else:
+                    if silence_warned:
+                        logger.warning("Microphone signal restored — resuming detection")
+                    health.consecutive_silent = 0
+                    silence_warned = False
+                frame = samples.astype(np.float32)
+                confirmed = detector.process_window(frame)
+                recorder.feed(frame, confirmed)
+                if confirmed:
+                    # Enqueue only — delivery, retries and the cooldown live on the
+                    # sender thread so this loop never waits on the network.
+                    outcome = sender.smoke()
+                    if outcome == "queued":
+                        logger.warning("ALARM DETECTED — sending notification")
+                    elif outcome == "cooldown":
+                        logger.info("Alarm detected but in cooldown (%ds remaining)",
+                                    sender.cooldown_remaining())
+                # Stamped on success only: a detector failing on every window
+                # goes "stuck" and gets the process restarted.
+                health.last_processed_ts = time.monotonic()
+            except Exception:
+                # One bad window must not kill this thread: a dead worker used to
+                # look healthy (the callback kept stamping last_window_ts).
+                logger.exception("Error while processing an audio window — continuing")
 
     # Callers (tests, an embedding process) can pass their own event to shut the
     # worker threads and the stream supervisor down cleanly; __main__ relies on
@@ -373,6 +401,14 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
                                 priority="low",
                             )
                             announced_loss = False
+                    worker_state = worker_verdict(
+                        worker.is_alive(), now, health.last_window_ts,
+                        health.last_processed_ts, STREAM_STALL_SECONDS,
+                    )
+                    if worker_state != "ok":
+                        logger.critical("Audio processing worker is %s — exiting so systemd restarts us",
+                                        worker_state)
+                        raise WorkerDied(worker_state)
                     verdict = diagnose_stream(
                         now, health.last_window_ts, health.consecutive_silent,
                         STREAM_STALL_SECONDS, silence_windows_limit,
@@ -409,12 +445,18 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
         supervise_stream()
     except KeyboardInterrupt:
         logger.info("Stopped by user")
-    stop_event.set()
-    audio_queue.put(None)
-    worker.join()
-    power_worker.join()
-    heartbeat_worker.join()
-    sender.join(timeout=5)
+    finally:
+        stop_event.set()
+        # put_nowait + bounded join: a hung worker may have left the queue
+        # full and will never pick up the sentinel.
+        try:
+            audio_queue.put_nowait(None)
+        except queue.Full:
+            pass
+        worker.join(timeout=2)
+        power_worker.join()
+        heartbeat_worker.join()
+        sender.join(timeout=5)
 
 
 if __name__ == "__main__":
