@@ -147,3 +147,22 @@ def test_prune_keeps_only_max_files_newest(tmp_path):
     assert len(files) == 5
     assert files[0].name == "20260101-000004-hit.wav"   # oldest 3 pruned
     assert files[-1].name == "20260101-000008-hit.wav"
+
+
+def test_recordings_are_owner_only(tmp_path):
+    # H-12: room audio — dir 0700, files 0600, even under a permissive umask
+    # and when the dir already existed with looser permissions.
+    import os
+    import stat
+    (tmp_path / "recordings").mkdir(mode=0o755)
+    old = os.umask(0o002)
+    try:
+        rec = Recorder(_config(tmp_path, pre_seconds=1, post_seconds=1))
+        for _ in range(4):
+            rec.feed(_win(0.8), confirmed=True)
+    finally:
+        os.umask(old)
+    d = tmp_path / "recordings"
+    assert stat.S_IMODE(d.stat().st_mode) == 0o700
+    files = list(d.glob("*.wav"))
+    assert files and all(stat.S_IMODE(f.stat().st_mode) == 0o600 for f in files)

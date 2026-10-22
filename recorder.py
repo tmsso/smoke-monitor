@@ -10,6 +10,7 @@ and nothing is buffered. The pre-buffer here is intentionally sized only for
 recording — Batch 2's listen-in will resize/repurpose it.
 """
 import logging
+import os
 import math
 import wave
 from collections import deque
@@ -87,7 +88,10 @@ class Recorder:
             path = self.dir / f"{stamp}-{label}-{n}.wav"
             n += 1
         try:
-            self.dir.mkdir(parents=True, exist_ok=True)
+            # Room audio is private: owner-only dir and files. chmod covers a
+            # dir that pre-dates this (mkdir's mode only applies on creation).
+            self.dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            os.chmod(self.dir, 0o700)
             self._write_wav(path, audio)
             self._prune()
             logger.info("Recorded %s (%.1fs)", path, len(audio) / self.sample_rate)
@@ -96,7 +100,10 @@ class Recorder:
 
     def _write_wav(self, path: Path, audio: np.ndarray) -> None:
         pcm = (np.clip(audio, -1.0, 1.0) * 32767.0).astype("<i2")
-        with wave.open(str(path), "wb") as w:
+        # Created 0600 from the start (not chmod'ed after) so the clip is never
+        # briefly world-readable; O_EXCL also refuses to clobber an existing file.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as f, wave.open(f, "wb") as w:
             w.setnchannels(1)
             w.setsampwidth(2)
             w.setframerate(self.sample_rate)
