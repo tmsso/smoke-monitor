@@ -111,14 +111,21 @@ is buffered or written.
 ## Install as systemd service
 
 First edit `User=` in `smoke-monitor.service` to the account that owns the
-checkout (`%h` in the unit is that account's home). The unit is sandboxed
-(`ProtectSystem=strict`, `ProtectHome=read-only`, …): the service can read its
-checkout but write only to `recordings/`, so create that directory before
-installing:
+checkout. The unit is sandboxed (`ProtectSystem=strict`,
+`ProtectHome=read-only`, …): the service can read its checkout but write only
+to `recordings/`, so create that directory before installing.
+
+The unit is a template: its paths use `%h`, which in a *system* unit means
+root's home, not the `User=` account's ([systemd.unit](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html#Specifiers)).
+Copied as-is the service can't find its checkout, and the `-` on
+`ReadWritePaths` silently drops the recordings exception. So render `%h` to
+your home while installing — run this as that account, not under `sudo`
+(sudo would make `$HOME` root's):
 
 ```bash
 mkdir -p recordings && chmod 700 recordings
-sudo cp smoke-monitor.service /etc/systemd/system/
+sed "s#%h#$HOME#g" smoke-monitor.service | sudo tee /etc/systemd/system/smoke-monitor.service >/dev/null
+systemd-analyze verify /etc/systemd/system/smoke-monitor.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now smoke-monitor
 sudo journalctl -u smoke-monitor -f

@@ -5,7 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# Edit to the local account that owns the checkout (%h below is its home).
+# Template: don't copy it as-is. In a system unit `%h` is root's home (it
+# ignores User=), so render it to the service account's home on install —
+# see README "Install as systemd service". Edit User= to that account.
 User=tomi
 WorkingDirectory=%h/git/smoke-monitor
 EnvironmentFile=%h/git/smoke-monitor/.env

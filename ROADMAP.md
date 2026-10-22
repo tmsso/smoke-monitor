@@ -206,11 +206,11 @@ Sources: a code review and the service journal for 2026-07-13 → 2026-10-18
 Suggested PR order: H-1, H-2, H-3, H-6/H-7 (one PR), H-4/H-5 (one PR),
 H-8 (after D-1), H-9, H-12, H-10, H-13, H-11 last (owner installs it).
 
-Status: **code complete (2026-10-22) — NOT yet deployed.** All items are
-built as a stacked PR chain #18–#30 (each based on the previous; #30 is D-9) with
-passing unit/integration tests and CI. Not live until the chain is merged,
-the live checkout pulled and the service restarted; H-11 additionally
-needs the unit reinstalled (sudo). Physical / wall-clock checks:
+Status: **deployed 2026-10-22.** All items were built as a stacked PR chain
+#18–#30 (each based on the previous; #30 is D-9), merged with merge commits,
+and the hardened unit is installed (H-11). Found while deploying: the unit's
+`%h` paths resolve to root's home in a system unit (they ignore `User=`), so a
+plain `cp` install was broken — the install docs now render `%h` first (PR #31). Physical / wall-clock checks:
 `manual-tests/2026-10-22-batch-h-hardening.md` (`DEP/HB/AL/SVC/HC`).
 Open residue: H-8's "`--replay` of O-3's recording fires" waits on O-3
 (manual case AL-1). Deviations from the specs below are listed in each PR
@@ -321,7 +321,8 @@ is stamped only on success; httpx error lines are redacted too).
   `ProtectSystem=strict`, `ProtectHome=read-only`,
   `ReadWritePaths=-%h/git/smoke-monitor/recordings` (create the dir before
   installing — with a read-only home the service can't create it). Add a
-  README note that `User=` must be edited to the local account.
+  README note that `User=` must be edited to the local account, and that
+  `%h` must be rendered on install (a system unit resolves it to `/root`).
   *Done when:* the owner reinstalls the unit and the journal shows
   "Listening on …" plus a recorded test clip — add a manual-sheet case.
 - ~~**H-12 Recordings are private.**~~ — *done (PR #23)* Create the recordings dir `0o700` and
