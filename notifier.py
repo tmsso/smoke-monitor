@@ -25,9 +25,21 @@ class Notifier:
         if not topic:
             raise ValueError("NTFY_TOPIC env var is not set")
         self.url = ntfy["ntfy_url"].rstrip("/") + "/" + topic
+        self._topic = topic
         self.cooldown_minutes = ntfy["cooldown_minutes"]
+        # Optional access token for a protected topic (ntfy account or a
+        # self-hosted server with ACLs). Sent on every request.
+        headers = {}
+        token = os.environ.get("NTFY_TOKEN", "")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         # `transport` lets tests swap in httpx.MockTransport; None = real network.
-        self._client = httpx.Client(transport=transport, timeout=10)
+        self._client = httpx.Client(transport=transport, timeout=10, headers=headers)
+
+    def _redact(self, text: str) -> str:
+        """The topic is the secret on ntfy.sh — keep it out of log lines
+        (httpx error messages embed the full request URL)."""
+        return text.replace(self._topic, "<topic>")
 
     def send(self, message: str = "", title: str = "SMOKE ALARM", tags: str = "rotating_light,fire", priority: str = "urgent") -> bool:
         """POST one notification. Returns True on a 2xx, False on any failure."""
@@ -47,7 +59,7 @@ class Notifier:
             logger.info("Notification sent: %s", message)
             return True
         except Exception as e:
-            logger.error("Failed to send notification: %s", e)
+            logger.error("Failed to send notification: %s", self._redact(str(e)))
             return False
 
 
