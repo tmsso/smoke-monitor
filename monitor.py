@@ -361,11 +361,21 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
         nonlocal current_device
         announced_loss = False
         while not stop_event.is_set():
+            stream = None
             try:
                 stream = open_stream(current_device)
+                # A `with stream:` block would call start() in __enter__, outside
+                # this try — a device that opens but fails to start then killed
+                # the process. Entering here gives it the open-failure retry path.
+                stream.__enter__()
             except Exception as e:
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
                 logger.error(
-                    "Could not open input device %s: %s — retrying in %.0fs",
+                    "Could not open/start input device %s: %s — retrying in %.0fs",
                     describe_device(sd.query_devices(), current_device), e, DEVICE_RETRY_SECONDS,
                 )
                 if not announced_loss:
@@ -379,7 +389,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
                 current_device, _ = pick_device()
                 continue
 
-            with stream:
+            try:
                 health.reset()
                 reset_ts = health.last_window_ts
                 confirmed_healthy = False
@@ -443,6 +453,8 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
                             )
                             current_device = upgrade[0]
                             break
+            finally:
+                stream.__exit__(None, None, None)
 
     try:
         supervise_stream()
