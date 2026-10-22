@@ -5,14 +5,28 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# Edit to the local account that owns the checkout (%h below is its home).
 User=tomi
 WorkingDirectory=%h/git/smoke-monitor
 EnvironmentFile=%h/git/smoke-monitor/.env
 ExecStart=%h/git/smoke-monitor/.venv/bin/python monitor.py --config config.toml
-Restart=on-failure
+# A safety monitor that exits cleanly is still not monitoring: restart on
+# any exit, not just failures. `systemctl stop` still stops it.
+Restart=always
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
+
+# Sandboxing: the monitor only needs to read its checkout, use the sound
+# devices and talk to the network. Everything else is read-only or hidden.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+# The one place it writes: event recordings ([recording] dir). Create it
+# before installing — with a read-only home the service can't. The leading
+# "-" keeps the unit startable if it's missing.
+ReadWritePaths=-%h/git/smoke-monitor/recordings
 
 [Install]
 WantedBy=multi-user.target
