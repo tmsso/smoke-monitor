@@ -2,7 +2,7 @@
 
 Listens to a microphone for smoke alarm sounds and sends a push notification via [ntfy.sh](https://ntfy.sh).
 
-Runs as a systemd service on an always-on PC. Conservative detection: requires 5 of 8 consecutive 0.5s audio windows to show dominant energy in the 3000–3600 Hz band before alerting. Alerts are sent from a background thread and retried with backoff until delivered; a 10-minute cooldown starts once one gets through.
+Runs as a systemd service on an always-on PC. Conservative detection: requires 5 of the last 16 0.5s audio windows (8 s) to show dominant energy in the 3000–3600 Hz band before alerting — enough to catch a standard T3 alarm cadence at any timing. Alerts are sent from a background thread and retried with backoff until delivered; a 10-minute cooldown starts once one gets through.
 
 ## Setup
 
@@ -61,9 +61,9 @@ python monitor.py --play-tone --tone-hz 2900
 
 Run it in one terminal against `python monitor.py --test` in another for an
 end-to-end check through the actual mic. `--test` fires on a single in-band
-window. A non-`--test` run needs 5 hits in 8 windows, and whether the T3
-beep/gap cadence gets there depends on how the beeps line up with the 0.5 s
-windows — so a full run may or may not confirm `--play-tone` (see ROADMAP H-8).
+window. A non-`--test` run needs 5 hits in the last 16 windows; a T3 cadence
+(`--play-tone`) scores at least 6/16 however the beeps line up with the 0.5 s
+windows, so a full run confirms it within ~8–12 s.
 
 **Live tuning dashboard.** `--dashboard` shows a terminal UI (needs `rich`;
 works over SSH), refreshed per window: the band-energy ratio as a meter with
@@ -166,7 +166,7 @@ python monitor.py --debug --test         # --test fires on a single hit
 ```
 
 - **`ratio` rises when you beep** → the mic works; a real (sustained) alarm will
-  confirm. Short test chirps are filtered by design (needs ~2.5s of tone).
+  confirm. Short test chirps are filtered by design (needs ~2.5s of tone within 8s).
 - **`ratio` stays ~0** → the mic is delivering silence. See below.
 
 **Microphone muted (delivers pure silence).** A muted mic returns exactly-zero

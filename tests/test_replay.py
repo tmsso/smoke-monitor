@@ -101,7 +101,8 @@ def test_missing_file_is_rejected(tmp_path, capsys):
 
 def test_cli_entrypoint_runs(tmp_path):
     wav = tmp_path / "alarm.wav"
-    _write_wav(wav, _sustained_tone(6))
+    # > 8 s: the shipped 5-of-16 rule needs a full 16-window history to confirm.
+    _write_wav(wav, _sustained_tone(10))
     r = subprocess.run(
         [sys.executable, "monitor.py", "--replay", str(wav)],
         cwd=ROOT, capture_output=True, text=True,

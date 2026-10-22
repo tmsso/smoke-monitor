@@ -27,8 +27,12 @@ freq_high_hz = 3600
 # Fraction of total spectral energy that must fall in the band to count as a hit.
 energy_ratio_threshold = 0.35
 # Alert fires when confirm_windows out of the last confirm_out_of windows are hits.
+# 5 of 16 (8 s) catches a T3 alarm (3 × 0.5 s beeps per 4 s) at any beep/window
+# alignment: its worst case is 6/16. The old 5 of 8 never fired when the beeps
+# lined up with the windows (only 3/8 hit). Nothing can confirm in the first
+# confirm_out_of × window_seconds (8 s) after start.
 confirm_windows = 5
-confirm_out_of = 8
+confirm_out_of = 16
 
 [recording]
 # Save a WAV around every confirmed detection, including a few seconds from
