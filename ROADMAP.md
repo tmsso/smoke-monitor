@@ -14,10 +14,10 @@ the config keys to add, and what "done" looks like. Current code layout:
 | `monitor.py` | CLI, `run()`: supervised audio stream, `process_loop`, power + heartbeat threads |
 | `detector.py` | `SmokeDetector`; `analyze_window()` → `WindowMetrics` (stateful — call it **or** `process_window`, never both per window) |
 | `audio_devices.py` | pure device-selection fns (`select_input_device`, `better_device`, `diagnose_stream`, `describe_device`) |
-| `notifier.py` | `Notifier.send()` — ntfy push (currently fire-and-forget, swallows errors) |
-| `recorder.py` | event recorder + rolling pre-buffer (filled only when `[recording] enabled`) |
+| `notifier.py` | `Notifier.send()` → bool (ntfy push, optional `NTFY_TOKEN`), `Notifier.ping()`; `AlertSender` — daemon-thread delivery, smoke retries + cooldown (H-2) |
+| `recorder.py` | event recorder + rolling pre-buffer (filled only when `[recording] enabled`); dir 0700 / WAVs 0600 |
 | `dashboard.py` / `replay.py` / `tone.py` | `--dashboard`, `--replay`, `--play-tone` |
-| `tests/` | pytest (`.venv/bin/python -m pytest -q`, ~40 s); no CI yet (H-10) |
+| `tests/` | pytest (`.venv/bin/python -m pytest -q`, ~60 s); CI runs it on every PR (`.github/workflows/test.yml`, H-10) |
 | `manual-tests/` | dated physical-check sheets with stable case IDs |
 | `config.toml` / `README.md` | all settings / keep in sync with every user-facing change |
 
@@ -48,13 +48,14 @@ that is a runnable command or test**. Conventions:
 
 ## Owner-only steps (do these before the next long-batch run)
 
-- **O-1 Use a high-entropy ntfy topic — do now.** ntfy.sh topics are
+- ~~**O-1 Use a high-entropy ntfy topic**~~ — *done 2026-10-22.* ntfy.sh topics are
   unauthenticated: the topic name is the only secret, and anyone who knows
   it can read alerts *and* publish fake ones. Generate one with
   `python -c "import secrets; print(secrets.token_urlsafe(18))"`, update
   `.env` and the phone subscription, then `chmod 600 .env`. Required
   before Batch 2 (which would put room audio on that topic).
-- **O-2 Deploy what's merged.** The service has run unchanged since
+- ~~**O-2 Deploy what's merged**~~ — *done 2026-10-22 (Batch 1 live; Batch H
+  still needs its own deploy, see Batch H status).* The service has run unchanged since
   2026-07-13; nothing since Batch 1 is live. `git pull` →
   `.venv/bin/pip install -r requirements.txt` →
   `sudo systemctl restart smoke-monitor` → read `journalctl -u
@@ -69,6 +70,15 @@ that is a runnable command or test**. Conventions:
 
 ## Decisions needed (recommended default in **bold**)
 
+- *(D-1..D-4 answered 2026-10-22: 5-of-16, optional ping code, CI yes,
+  keep the system unit. D-5 stands for Batch 2.)*
+- **D-9 Confirm before the history is full?** `SmokeDetector` only confirms
+  once all `confirm_out_of` windows are in the history, so with 16 windows
+  nothing can fire in the first 8 s after start, and a `--replay` clip
+  shorter than 8 s never fires. Dropping the `len(history) >= confirm_out_of`
+  condition fires on the same evidence (5 hits) sooner, with no extra
+  false-positive exposure. **Recommended: drop it** (small detector PR +
+  test); until then the blind spot stands.
 - **D-1 Confirmation rule vs. T3 cadence** (H-8). The 5-of-8 rule misses a
   T3 alarm depending on how the beeps line up with the 0.5 s windows.
   Choose: **`confirm_windows = 5`, `confirm_out_of = 16`** / 6-of-16 /
@@ -195,7 +205,18 @@ Sources: a code review and the service journal for 2026-07-13 → 2026-10-18
 Suggested PR order: H-1, H-2, H-3, H-6/H-7 (one PR), H-4/H-5 (one PR),
 H-8 (after D-1), H-9, H-12, H-10, H-13, H-11 last (owner installs it).
 
-- **H-1 Cooldowns must start "never fired"** *(bug)*. `last_alert_time`
+Status: **code complete (2026-10-22) — NOT yet deployed.** All items are
+built as a stacked PR chain #18–#29 (each based on the previous) with
+passing unit/integration tests and CI. Not live until the chain is merged,
+the live checkout pulled and the service restarted; H-11 additionally
+needs the unit reinstalled (sudo). Physical / wall-clock checks:
+`manual-tests/2026-10-22-batch-h-hardening.md` (`DEP/HB/AL/SVC/HC`).
+Open residue: H-8's "`--replay` of O-3's recording fires" waits on O-3
+(manual case AL-1). Deviations from the specs below are listed in each PR
+body (e.g. the smoke cooldown moved into `AlertSender`; `last_processed_ts`
+is stamped only on success; httpx error lines are redacted too).
+
+- ~~**H-1 Cooldowns must start "never fired"**~~ — *done (PR #18)* *(bug)*. `last_alert_time`
   and `last_power_alert_time` in `run()` start at `0.0` and are compared
   against `time.monotonic()`, which on Linux counts from boot. The service
   starts seconds after boot, so a smoke alarm in the first
@@ -204,7 +225,7 @@ H-8 (after D-1), H-9, H-12, H-10, H-13, H-11 last (owner installs it).
   `None`; factor the check into `cooldown_elapsed(last, now, seconds)`.
   *Done when:* `pytest tests/test_cooldown.py` shows a confirmation at
   `monotonic() == 30.0` sends, and a second one inside the cooldown doesn't.
-- **H-2 Reliable, non-blocking alert delivery.** Today
+- ~~**H-2 Reliable, non-blocking alert delivery.**~~ — *done (PR #19)* Today
   `notifier.send()` runs on the audio-processing thread (10 s timeout,
   ≈ the 8 s queue → audio dropped mid-alarm), swallows every error, and
   `last_alert_time` is set *before* the send — so one network blip loses
@@ -219,7 +240,7 @@ H-8 (after D-1), H-9, H-12, H-10, H-13, H-11 last (owner installs it).
   *Done when:* a test with `httpx.MockTransport` failing twice then
   returning 200 delivers exactly one smoke push; the enqueue call returns
   in < 10 ms while the transport sleeps; all existing tests pass.
-- **H-3 A crashed worker must not look healthy.** An exception in
+- ~~**H-3 A crashed worker must not look healthy.**~~ — *done (PR #20)* An exception in
   `process_loop` kills that daemon thread silently; the audio callback
   keeps stamping `last_window_ts`, so `diagnose_stream` says "ok" and the
   heartbeat says "running normally" while nothing is analyzed. Fix: wrap
@@ -229,7 +250,7 @@ H-8 (after D-1), H-9, H-12, H-10, H-13, H-11 last (owner installs it).
   `2 × STREAM_STALL_SECONDS` while windows still arrive.
   *Done when:* a test detector that raises on one window keeps processing
   the next; a test that kills the worker makes `run()` exit non-zero.
-- **H-4 Honest heartbeat.** The heartbeat is the only daily liveness
+- ~~**H-4 Honest heartbeat.**~~ — *done (PR #24)* The heartbeat is the only daily liveness
   signal but says "running normally" unconditionally. Build it from a pure
   `heartbeat_status(stats) -> (title, message, priority, tags)`: device in
   use, windows processed, overflow count and peak band ratio since the
@@ -239,7 +260,7 @@ H-8 (after D-1), H-9, H-12, H-10, H-13, H-11 last (owner installs it).
   interval) — observed drift: 09:00:08 → 09:01:26 over 97 days.
   *Done when:* unit tests cover healthy / muted / stalled / dead-worker
   stats; scheduling test shows no drift across simulated sends.
-- **H-5 Aggregate overflow warnings.** The audio callback logs a WARNING
+- ~~**H-5 Aggregate overflow warnings.**~~ — *done (PR #24)* The audio callback logs a WARNING
   per `input overflow` (644 lines in 97 days). Count overflows instead;
   log one INFO summary at most hourly when non-zero, feed the count to
   H-4. Other status flags still log immediately. (Root cause unknown —
@@ -247,18 +268,18 @@ H-8 (after D-1), H-9, H-12, H-10, H-13, H-11 last (owner installs it).
   is an unverified hypothesis: the process sits ~83 MB in swap.)
   *Done when:* a test calling the callback with fake overflow statuses
   produces no per-call WARNING and one summary line.
-- **H-6 Keep the topic out of the journal.** `httpx` logs the full request
+- ~~**H-6 Keep the topic out of the journal.**~~ — *done (PR #21)* `httpx` logs the full request
   URL — including the secret topic — at INFO. Set
   `logging.getLogger("httpx").setLevel(logging.WARNING)` in `monitor.py`;
   `Notifier` logs its own line without the URL.
   *Done when:* a `caplog` test of a mocked send finds no topic string.
-- **H-7 Optional ntfy access token.** `NTFY_TOKEN` env var → `Authorization:
+- ~~**H-7 Optional ntfy access token.**~~ — *done (PR #21)* `NTFY_TOKEN` env var → `Authorization:
   Bearer …` header on every request (send, and Batch 2's
   subscribe/upload). Commented entry in `.env.example`; README note on
   using it with an ntfy account or a self-hosted server with ACLs.
   *Done when:* MockTransport tests assert the header is present iff the
   env var is set.
-- **H-8 T3-robust confirmation** *(needs D-1)*. A T3 alarm is 3 × 0.5 s
+- ~~**H-8 T3-robust confirmation**~~ — *done (PR #25)* *(needs D-1)*. A T3 alarm is 3 × 0.5 s
   beeps per 4 s cycle — 8 windows. When beeps align with window
   boundaries, only 3 of every 8 windows hit and 5-of-8 can never fire;
   nothing re-aligns them except clock jitter. Simulation (synthetic
@@ -281,18 +302,18 @@ H-8 (after D-1), H-9, H-12, H-10, H-13, H-11 last (owner installs it).
   Note: a 16-window history means nothing can confirm in the first 8 s
   after start. Batch 3's `require_t3` stays the false-positive filter.
   *Done when:* that test passes and `--replay` of O-3's recording fires.
-- **H-9 Survive a stream that fails to start.** `open_stream()` failures
+- ~~**H-9 Survive a stream that fails to start.**~~ — *done (PR #22)* `open_stream()` failures
   are retried, but an exception from `stream.start()` (the `with stream:`
   entry) escapes `supervise_stream` and kills the process. Treat it like
   an open failure (log, low-priority notify once, retry).
   *Done when:* a test with a fake stream whose `__enter__` raises once
   shows the supervisor retrying and then listening.
-- **H-10 CI** *(needs D-3)*. `.github/workflows/test.yml`: on push/PR,
+- ~~**H-10 CI**~~ — *done (PR #26)* *(needs D-3)*. `.github/workflows/test.yml`: on push/PR,
   ubuntu-latest, Python 3.14 (matches the venv),
   `sudo apt-get install -y libportaudio2` (sounddevice imports fail
   without it), `pip install -r requirements-dev.txt`, `pytest -q`.
   *Done when:* the workflow is green on its own PR.
-- **H-11 systemd unit hardening** *(owner installs, sudo)*. In
+- ~~**H-11 systemd unit hardening**~~ — *done (PR #28)* *(owner installs, sudo)*. In
   `smoke-monitor.service`: `Restart=always` (a clean exit of a safety
   monitor is still a failure), `NoNewPrivileges=yes`, `PrivateTmp=yes`,
   `ProtectSystem=strict`, `ProtectHome=read-only`,
@@ -301,10 +322,10 @@ H-8 (after D-1), H-9, H-12, H-10, H-13, H-11 last (owner installs it).
   README note that `User=` must be edited to the local account.
   *Done when:* the owner reinstalls the unit and the journal shows
   "Listening on …" plus a recorded test clip — add a manual-sheet case.
-- **H-12 Recordings are private.** Create the recordings dir `0o700` and
+- ~~**H-12 Recordings are private.**~~ — *done (PR #23)* Create the recordings dir `0o700` and
   write WAVs `0o600` (room audio). *Done when:* a recorder test asserts
   the modes.
-- **H-13 Dead-man's-switch ping** *(needs D-2)*. If `HEALTHCHECK_URL` is
+- ~~**H-13 Dead-man's-switch ping**~~ — *done (PR #27)* *(needs D-2)*. If `HEALTHCHECK_URL` is
   set, GET it every `healthcheck_interval_minutes` (default 5,
   `[notification]`) — only while H-4's stats say healthy — via the H-2
   sender. Unset → feature off, no network calls. README: how to set up the
@@ -319,6 +340,8 @@ actual audio to the phone instead of forcing a guess.
 
 Prerequisites: H-2 (attachments go through the sender thread), H-7, O-1,
 and D-1 decided (the near-miss definition depends on the history length).
+*(2026-10-22: all met in code once the Batch H chain is merged; consider
+D-9 first, since the near-miss definition depends on the history rule.)*
 
 - **Rolling pre-buffer** — move the deque out of `Recorder` into a small
   `RollingBuffer` (`recorder.py`) owned by `process_loop`, capacity
