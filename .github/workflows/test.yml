@@ -1,0 +1,27 @@
+name: tests
+
+# pull_request (not pull_request_target): runs fork PRs without repo secrets.
+# The tests need none — ntfy is always mocked and no topic is read.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"   # matches the deploy host's venv
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      # sounddevice needs the PortAudio shared library just to import.
+      - run: sudo apt-get update && sudo apt-get install -y libportaudio2
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q
