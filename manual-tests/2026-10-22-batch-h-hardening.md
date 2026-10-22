@@ -68,8 +68,10 @@ lines (before H-6 was deployed) contain the ntfy topic.
 **SVC-1 — install and record under the sandbox**
 1. `mkdir -p recordings && chmod 700 recordings`
 2. Check `User=` in `smoke-monitor.service`.
-3. `sudo cp smoke-monitor.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart smoke-monitor`
-4. **Expect:** `Listening on …` in the journal.
+3. Install it rendered, as in the README (not a plain `cp`: `%h` would mean root's home):
+   `sed "s#%h#$HOME#g" smoke-monitor.service | sudo tee /etc/systemd/system/smoke-monitor.service >/dev/null && sudo systemctl daemon-reload && sudo systemctl restart smoke-monitor`
+4. **Expect:** `Listening on …` in the journal, and
+   `systemctl show -p ReadWritePaths smoke-monitor` names your home's `recordings`, not `/root/…`.
 5. Run AL-1 (or any detection with recording on). **Expect:** the clip is
    written (`ls -l recordings/` shows `-rw-------`), no "Read-only file system" error.
 
