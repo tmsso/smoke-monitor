@@ -2,6 +2,7 @@
 import sys
 import threading
 import time
+from types import SimpleNamespace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -48,9 +49,9 @@ def test_one_failing_window_does_not_stop_processing(monkeypatch):
         calls.append(1)
         if len(calls) == 1:
             raise ValueError("boom")
-        return False
+        return SimpleNamespace(confirmed=False, ratio=0.0)
 
-    monkeypatch.setattr(monitor.SmokeDetector, "process_window", flaky)
+    monkeypatch.setattr(monitor.SmokeDetector, "analyze_window", flaky)
     stop = threading.Event()
     t, result = _start_run(stop)
     time.sleep(1.5)
@@ -68,7 +69,7 @@ def test_dead_worker_makes_run_raise(monkeypatch):
     def die(self, x):
         raise _ThreadKiller()
 
-    monkeypatch.setattr(monitor.SmokeDetector, "process_window", die)
+    monkeypatch.setattr(monitor.SmokeDetector, "analyze_window", die)
     monkeypatch.setattr(threading, "excepthook", lambda args: None)  # quiet the dying thread
     stop = threading.Event()
     t, result = _start_run(stop)
@@ -86,7 +87,7 @@ def test_worker_failing_every_window_makes_run_raise(monkeypatch):
     def always_fail(self, x):
         raise ValueError("broken detector")
 
-    monkeypatch.setattr(monitor.SmokeDetector, "process_window", always_fail)
+    monkeypatch.setattr(monitor.SmokeDetector, "analyze_window", always_fail)
     stop = threading.Event()
     t, result = _start_run(stop)
     t.join(timeout=6)

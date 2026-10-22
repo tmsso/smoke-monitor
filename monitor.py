@@ -85,6 +85,74 @@ def _read_ac_online() -> bool | None:
         return None
 
 
+# How often a non-zero count of audio input overflows is summarised in the log.
+OVERFLOW_SUMMARY_SECONDS = 3600.0
+_OTHER_STATUS_FLAGS = ("input_underflow", "output_overflow", "output_underflow", "priming_output")
+
+
+def is_overflow_only(status) -> bool:
+    """True if a PortAudio callback status carries only `input_overflow` — the
+    ~6/day harmless case that gets counted instead of logged per occurrence."""
+    return bool(getattr(status, "input_overflow", False)) and not any(
+        getattr(status, f, False) for f in _OTHER_STATUS_FLAGS
+    )
+
+
+def heartbeat_status(stats: dict) -> tuple[str, str, str, str]:
+    """Build the heartbeat from health stats → (title, message, priority, tags).
+
+    `stats` keys: device, windows, overflows, peak_ratio (all since the last
+    heartbeat), silent, stalled, worker_alive. Any problem turns the
+    heartbeat into a louder DEGRADED message instead of a blanket "OK".
+    """
+    problems = []
+    if not stats["worker_alive"]:
+        problems.append("audio processing worker is dead")
+    if stats["stalled"]:
+        problems.append("no audio arriving from the mic")
+    if stats["silent"]:
+        problems.append("mic delivers pure silence (muted or unplugged?)")
+    if stats["windows"] == 0:
+        problems.append("no audio analysed since the last heartbeat")
+    details = (
+        f"Mic: {stats['device']}. Since last heartbeat: {stats['windows']} windows "
+        f"analysed, peak band ratio {stats['peak_ratio']:.2f}, "
+        f"{stats['overflows']} input overflows."
+    )
+    if problems:
+        return ("Smoke Monitor DEGRADED", "Problem: " + "; ".join(problems) + ". " + details,
+                "default", "warning")
+    return ("Smoke Monitor OK", "Running normally. " + details, "low", "white_check_mark")
+
+
+def next_heartbeat(first: datetime, interval: timedelta, now: datetime) -> datetime:
+    """The first `first + k × interval` (k ≥ 0) strictly after `now`.
+
+    Anchored to the original schedule, so send latency never accumulates
+    (it drifted 09:00:08 → 09:01:26 over 97 days), and missed slots after a
+    suspend are skipped rather than fired in a burst. Naive local datetimes
+    keep 09:00 at 09:00 across DST changes.
+    """
+    if now < first:
+        return first
+    k = int((now - first) / interval) + 1
+    return first + k * interval
+
+
+def wait_until(target: datetime, now_fn, wait_fn, max_chunk: float = 60.0) -> bool:
+    """Sleep until wall-clock `target`; True if `wait_fn` reported a stop.
+
+    Waits in chunks and re-reads the clock, because one long monotonic wait
+    lands an hour off when DST changes (or the clock is stepped) mid-wait.
+    """
+    while True:
+        remaining = (target - now_fn()).total_seconds()
+        if remaining <= 0:
+            return False
+        if wait_fn(min(remaining, max_chunk)):
+            return True
+
+
 class WorkerDied(RuntimeError):
     """The audio-processing thread died or stopped keeping up. run() raises it
     so the process exits non-zero and systemd restarts it."""
@@ -161,6 +229,14 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
         last_window_ts = None
         last_processed_ts = None
         consecutive_silent = 0
+        device_desc = "not open yet"
+        # Since the last heartbeat (the heartbeat reads and zeroes them; a lost
+        # increment in that race is irrelevant for a daily summary).
+        windows_processed = 0
+        peak_ratio = 0.0
+        overflows = 0
+        # Since the last hourly overflow log line.
+        overflows_unlogged = 0
 
         @classmethod
         def reset(cls):
@@ -189,7 +265,13 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
 
     def audio_callback(indata, frames, time_info, status):
         if status:
-            logger.warning("Audio status: %s", status)
+            if is_overflow_only(status):
+                # Counted, summarised hourly by the supervisor and reported in
+                # the heartbeat — a WARNING per overflow was 644 lines/97 days.
+                health.overflows += 1
+                health.overflows_unlogged += 1
+            else:
+                logger.warning("Audio status: %s", status)
         health.last_window_ts = time.monotonic()
         try:
             audio_queue.put_nowait(indata[:, 0].copy())
@@ -230,7 +312,11 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
                     health.consecutive_silent = 0
                     silence_warned = False
                 frame = samples.astype(np.float32)
-                confirmed = detector.process_window(frame)
+                metrics = detector.analyze_window(frame)
+                confirmed = metrics.confirmed
+                health.windows_processed += 1
+                if metrics.ratio > health.peak_ratio:
+                    health.peak_ratio = metrics.ratio
                 recorder.feed(frame, confirmed)
                 if confirmed:
                     # Enqueue only — delivery, retries and the cooldown live on the
@@ -308,25 +394,28 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
         wait = (first - now).total_seconds()
         logger.info("First heartbeat scheduled at %s (%.0fs from now)", first.strftime("%H:%M"), wait)
 
-        if stop_event.wait(wait):
-            return
-        sender.send(
-            message="Smoke monitor is running normally.",
-            title="Smoke Monitor OK",
-            tags="white_check_mark",
-            priority="low",
-        )
-        logger.info("Heartbeat sent")
-
-        interval_seconds = interval_hours * 3600
-        while not stop_event.wait(interval_seconds):
-            sender.send(
-                message="Smoke monitor is running normally.",
-                title="Smoke Monitor OK",
-                tags="white_check_mark",
-                priority="low",
-            )
-            logger.info("Heartbeat sent")
+        interval = timedelta(hours=interval_hours)
+        target = first
+        while not wait_until(target, datetime.now, stop_event.wait):
+            last_ts = health.last_window_ts
+            stats = {
+                "device": health.device_desc,
+                "windows": health.windows_processed,
+                "overflows": health.overflows,
+                "peak_ratio": health.peak_ratio,
+                "silent": health.consecutive_silent >= silence_warn_after,
+                "stalled": last_ts is None or time.monotonic() - last_ts > STREAM_STALL_SECONDS,
+                "worker_alive": worker.is_alive(),
+            }
+            health.windows_processed = 0
+            health.peak_ratio = 0.0
+            health.overflows = 0
+            title, message, priority, tags = heartbeat_status(stats)
+            sender.send(message=message, title=title, tags=tags, priority=priority)
+            logger.info("Heartbeat sent: %s", title)
+            # max(): a clock stepped back right after a send must not hand us
+            # the same slot again (double heartbeat).
+            target = next_heartbeat(first, interval, max(datetime.now(), target))
 
     worker = threading.Thread(target=process_loop, daemon=True)
     worker.start()
@@ -360,6 +449,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
         """
         nonlocal current_device
         announced_loss = False
+        last_overflow_log = time.monotonic()
         while not stop_event.is_set():
             stream = None
             try:
@@ -394,6 +484,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
                 reset_ts = health.last_window_ts
                 confirmed_healthy = False
                 desc = describe_device(sd.query_devices(), current_device)
+                health.device_desc = desc
                 logger.info("Listening on %s… press Ctrl+C to stop", desc)
 
                 last_poll = time.monotonic()
@@ -414,6 +505,12 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
                                 priority="low",
                             )
                             announced_loss = False
+                    if now - last_overflow_log >= OVERFLOW_SUMMARY_SECONDS:
+                        last_overflow_log = now
+                        if health.overflows_unlogged:
+                            logger.info("Audio input overflows in the last %.0f min: %d",
+                                        OVERFLOW_SUMMARY_SECONDS / 60, health.overflows_unlogged)
+                            health.overflows_unlogged = 0
                     worker_state = worker_verdict(
                         worker.is_alive(), now, health.last_window_ts,
                         health.last_processed_ts, STREAM_STALL_SECONDS,
