@@ -147,7 +147,11 @@ heartbeat_interval_hours = 24   # set to 0 to disable
 heartbeat_time = "09:00"        # first heartbeat fires at or after this local time
 ```
 
-Subsequent pings follow every `heartbeat_interval_hours` from the first. Setting `heartbeat_time` prevents overnight notifications when the service (re)starts.
+Subsequent pings stay anchored to that local time (every `heartbeat_interval_hours` from the first, no drift, unaffected by DST). Setting `heartbeat_time` prevents overnight notifications when the service (re)starts.
+
+The heartbeat reports what it actually saw since the previous one: the mic in use, windows analysed, peak band ratio and audio input overflows. If anything is wrong (processing worker dead, no audio arriving, mic delivering pure silence, nothing analysed) it arrives as **"Smoke Monitor DEGRADED"** at default priority instead of "OK". Note the heartbeat can't report a dead laptop — that's what an external check is for.
+
+Audio input overflows (dropped audio blocks) are counted rather than logged one by one; a summary line appears in the log at most once an hour.
 
 ## Troubleshooting
 

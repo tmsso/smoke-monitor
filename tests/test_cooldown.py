@@ -7,6 +7,7 @@ the first `cooldown_minutes` after a reboot.
 import sys
 import threading
 import time
+from types import SimpleNamespace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -31,7 +32,8 @@ def test_alarm_30s_after_boot_is_sent_once(monkeypatch):
     sends = []
     monkeypatch.setattr(monitor.Notifier, "send", lambda self, *a, **k: sends.append(k) or True)
     # Every window confirms, so the loop sees a confirmation ~20×/s.
-    monkeypatch.setattr(monitor.SmokeDetector, "process_window", lambda self, x: True)
+    monkeypatch.setattr(monitor.SmokeDetector, "analyze_window",
+                        lambda self, x: SimpleNamespace(confirmed=True, ratio=0.9))
     # Pretend the machine booted 30 s ago: monotonic() reads 30.0 at start.
     real = time.monotonic
     start = real()
