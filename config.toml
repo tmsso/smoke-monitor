@@ -53,3 +53,6 @@ power_loss_cooldown_minutes = 30
 heartbeat_interval_hours = 24
 # First heartbeat fires at or after this local time to avoid overnight notifications.
 heartbeat_time = "09:00"
+# Dead-man's switch: if the HEALTHCHECK_URL env var is set (see .env.example),
+# GET it this often while healthy. Unset = off, no network calls.
+healthcheck_interval_minutes = 5

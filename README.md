@@ -153,6 +153,25 @@ The heartbeat reports what it actually saw since the previous one: the mic in us
 
 Audio input overflows (dropped audio blocks) are counted rather than logged one by one; a summary line appears in the log at most once an hour.
 
+## Dead-man's switch (optional)
+
+A heartbeat can't tell you the laptop died — it just stops arriving. For that,
+use an external check that alerts when pings *stop*:
+
+1. Create a free check at [healthchecks.io](https://healthchecks.io) (or any
+   compatible service / self-hosted instance). Period 5 minutes, grace e.g.
+   15 minutes.
+2. In the check's integrations, enable a notification **to your phone** (e.g.
+   its ntfy, email or app integration) — that alert is what you're buying.
+3. Put the check's ping URL in `.env`: `HEALTHCHECK_URL=https://hc-ping.com/…`
+   and restart the service.
+
+The monitor then GETs the URL every `healthcheck_interval_minutes` (default 5)
+**only while healthy** — a dead worker, a stalled or silent mic, or no audio
+analysed skips the ping, so the external check fires for those too. The URL
+is a secret (anyone holding it can keep the check green), so it's never
+logged, and the ntfy token is never sent with it. Unset = feature off.
+
 ## Troubleshooting
 
 **The alarm never triggers / no hits even when beeping at the mic.**
