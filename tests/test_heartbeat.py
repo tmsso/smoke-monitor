@@ -74,7 +74,7 @@ def test_schedule_before_first():
 
 
 def test_wait_until_survives_dst_fall_back():
-    # Budapest leaves CEST on 2026-10-25 at 03:00 → 02:00. A single 24 h
+    # EU clocks fall back (CEST→CET) on 2026-10-25, 03:00 → 02:00. A single 24 h
     # monotonic wait from Saturday 09:00 would fire at 08:00 local on Sunday.
     real = [0.0]                                    # seconds elapsed on a monotonic clock
     start = datetime(2026, 10, 24, 9, 0, 1)

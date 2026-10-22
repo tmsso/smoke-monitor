@@ -32,7 +32,7 @@ lines (before H-6 was deployed) contain the ntfy topic.
 2. **Expect** on the phone: "Smoke Monitor OK", body names the mic and a
    non-zero "windows analysed" count; it arrives at 09:00 (± a few seconds).
 
-**HB-2 — DST change (Budapest falls back Sun 2026-10-25)**
+**HB-2 — DST change (EU clocks fall back Sun 2026-10-25)**
 1. Check the heartbeats on Sun 10-25 and Mon 10-26.
 2. **Expect:** both at 09:00 local, not 08:00 or 10:00.
 
