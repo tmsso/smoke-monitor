@@ -72,7 +72,8 @@ that is a runnable command or test**. Conventions:
 
 - *(D-1..D-4 answered 2026-10-22: 5-of-16, optional ping code, CI yes,
   keep the system unit. D-5 stands for Batch 2.)*
-- **D-9 Confirm before the history is full?** `SmokeDetector` only confirms
+- ~~**D-9 Confirm before the history is full?**~~ — *answered 2026-10-22:
+  drop it (PR #30).* `SmokeDetector` only confirmed
   once all `confirm_out_of` windows are in the history, so with 16 windows
   nothing can fire in the first 8 s after start, and a `--replay` clip
   shorter than 8 s never fires. Dropping the `len(history) >= confirm_out_of`
@@ -206,7 +207,7 @@ Suggested PR order: H-1, H-2, H-3, H-6/H-7 (one PR), H-4/H-5 (one PR),
 H-8 (after D-1), H-9, H-12, H-10, H-13, H-11 last (owner installs it).
 
 Status: **code complete (2026-10-22) — NOT yet deployed.** All items are
-built as a stacked PR chain #18–#29 (each based on the previous) with
+built as a stacked PR chain #18–#30 (each based on the previous; #30 is D-9) with
 passing unit/integration tests and CI. Not live until the chain is merged,
 the live checkout pulled and the service restarted; H-11 additionally
 needs the unit reinstalled (sudo). Physical / wall-clock checks:
@@ -299,7 +300,8 @@ is stamped only on success; httpx error lines are redacted too).
   ~2.5 s of tone" becomes ~2.5 s within 8 s) + `tests/test_t3_confirmation.py`
   sweeping phase offsets 0–4 s (0.1 s steps) × noise {0, 0.2, 0.5}: must
   confirm within 20 s; the 3-beep burst and 60 s of noise must not.
-  Note: a 16-window history means nothing can confirm in the first 8 s
+  *(Superseded by D-9 / PR #30: confirmation no longer waits for a full
+  history.)* Original note: a 16-window history means nothing can confirm in the first 8 s
   after start. Batch 3's `require_t3` stays the false-positive filter.
   *Done when:* that test passes and `--replay` of O-3's recording fires.
 - ~~**H-9 Survive a stream that fails to start.**~~ — *done (PR #22)* `open_stream()` failures
@@ -340,8 +342,9 @@ actual audio to the phone instead of forcing a guess.
 
 Prerequisites: H-2 (attachments go through the sender thread), H-7, O-1,
 and D-1 decided (the near-miss definition depends on the history length).
-*(2026-10-22: all met in code once the Batch H chain is merged; consider
-D-9 first, since the near-miss definition depends on the history rule.)*
+*(2026-10-22: all met in code once the Batch H chain is merged; D-9 —
+confirm without waiting for a full history — is in #30, so the near-miss
+definition can build on it.)*
 
 - **Rolling pre-buffer** — move the deque out of `Recorder` into a small
   `RollingBuffer` (`recorder.py`) owned by `process_loop`, capacity

@@ -92,3 +92,17 @@ def test_testing_mode_fires_on_single_hit_and_keeps_no_history():
     assert m.confirm_len == 0 and m.confirm_hits == 0
     miss = det.analyze_window(_noise_window())
     assert miss.confirmed is False
+
+
+def test_confirms_from_cold_start_without_full_history():
+    # D-9: 5 hits confirm as soon as they're in, even before 16 windows exist
+    # (the old rule was blind for the first confirm_out_of windows — 8 s).
+    det = SmokeDetector(_config(confirm_out_of=16))
+    confirmed = [det.analyze_window(_tone_window()).confirmed for _ in range(6)]
+    assert confirmed == [False, False, False, False, True, True]
+
+
+def test_partial_history_below_threshold_does_not_confirm():
+    det = SmokeDetector(_config(confirm_out_of=16))
+    for w in [_tone_window()] * 4 + [_noise_window(i) for i in range(12)]:
+        assert not det.analyze_window(w).confirmed

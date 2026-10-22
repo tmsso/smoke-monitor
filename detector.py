@@ -85,7 +85,10 @@ class SmokeDetector:
 
         self._history.append(hit)
         hits = sum(self._history)
-        confirmed = len(self._history) >= self.confirm_out_of and hits >= self.confirm_windows
+        # No "history must be full" condition (D-9): confirm_windows hits are
+        # the same evidence whether 6 or 16 windows have been seen, and the
+        # old condition made the first confirm_out_of windows (8 s) blind.
+        confirmed = hits >= self.confirm_windows
         logger.debug(
             "band ratio=%.3f threshold=%.3f hit=%s | confirm %d/%d hits (need %d/%d)",
             ratio, self.energy_threshold, hit,
