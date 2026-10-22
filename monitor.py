@@ -82,6 +82,16 @@ def _read_ac_online() -> bool | None:
         return None
 
 
+def cooldown_elapsed(last: float | None, now: float, seconds: float) -> bool:
+    """True if an alert may fire: none sent yet, or `seconds` passed since `last`.
+
+    `last` must start as None, not 0.0 — `time.monotonic()` counts from boot on
+    Linux, so a 0.0 start makes the first `seconds` after a reboot look like a
+    cooldown and silently drops the first alarm.
+    """
+    return last is None or now - last >= seconds
+
+
 def run(config_path: str = "config.toml", testing: bool = False, stop_event=None):
     config = load_config(config_path)
     detector = SmokeDetector(config, testing=testing)
@@ -120,7 +130,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
     silence_windows_limit = int(hotplug_silence_seconds / window_seconds) if hotplug_silence_seconds > 0 else 0
     device_poll_seconds = config["audio"].get("device_poll_seconds", 30)
 
-    last_alert_time = 0.0
+    last_alert_time = None
     audio_queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=16)
 
     # Shared, coarse stream-health signals: the audio callback stamps when a
@@ -202,7 +212,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
             recorder.feed(frame, confirmed)
             if confirmed:
                 now = time.monotonic()
-                if now - last_alert_time >= cooldown_seconds:
+                if cooldown_elapsed(last_alert_time, now, cooldown_seconds):
                     last_alert_time = now
                     logger.warning("ALARM DETECTED — sending notification")
                     notifier.send()
@@ -217,7 +227,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
         stop_event = threading.Event()
 
     def power_monitor_loop():
-        last_power_alert_time = 0.0
+        last_power_alert_time = None
         previous_ac = _read_ac_online()
         if previous_ac is None:
             logger.warning("Power supply status unavailable — power loss monitoring disabled")
@@ -236,7 +246,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
                 continue
             if previous_ac and not ac_online:
                 now = time.monotonic()
-                if now - last_power_alert_time >= power_cooldown_seconds:
+                if cooldown_elapsed(last_power_alert_time, now, power_cooldown_seconds):
                     last_power_alert_time = now
                     logger.warning("AC power lost — sending notification")
                     notifier.send(
