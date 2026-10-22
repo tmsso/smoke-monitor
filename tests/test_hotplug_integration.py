@@ -82,7 +82,7 @@ def _patch(monkeypatch):
     monkeypatch.setattr(monitor, "load_config", lambda *_a, **_k: BASE_CONFIG)
     monkeypatch.setattr(monitor.sd, "InputStream", FakeStream)
     monkeypatch.setattr(monitor.sd, "query_devices", lambda *a, **k: FAKE_DEVICES)
-    monkeypatch.setattr(monitor.Notifier, "send", lambda *a, **k: None)
+    monkeypatch.setattr(monitor.Notifier, "send", lambda *a, **k: True)
 
 
 def _run_run(seconds):
@@ -132,7 +132,7 @@ def test_tight_recovery_config_holds_cadence(monkeypatch):
     monkeypatch.setattr(monitor, "load_config", lambda *_a, **_k: cfg)
     monkeypatch.setattr(monitor.sd, "InputStream", FakeStream)
     monkeypatch.setattr(monitor.sd, "query_devices", lambda *a, **k: FAKE_DEVICES)
-    monkeypatch.setattr(monitor.Notifier, "send", lambda *a, **k: None)
+    monkeypatch.setattr(monitor.Notifier, "send", lambda *a, **k: True)
     FakeStream.instances = 0
     FakeStream.silent = True
     _run_run(18)

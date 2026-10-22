@@ -17,7 +17,7 @@ from audio_devices import (
     select_input_device,
 )
 from detector import SmokeDetector
-from notifier import Notifier
+from notifier import AlertSender, Notifier
 from recorder import Recorder
 
 # No audio window for this long ⇒ the device stopped delivering (unplug that
@@ -130,7 +130,6 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
     silence_windows_limit = int(hotplug_silence_seconds / window_seconds) if hotplug_silence_seconds > 0 else 0
     device_poll_seconds = config["audio"].get("device_poll_seconds", 30)
 
-    last_alert_time = None
     audio_queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=16)
 
     # Shared, coarse stream-health signals: the audio callback stamps when a
@@ -177,7 +176,6 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
     silence_warn_after = int(10 / window_seconds)  # ~10s of pure silence
 
     def process_loop():
-        nonlocal last_alert_time
         silence_warned = False
         while True:
             samples = audio_queue.get()
@@ -211,20 +209,21 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
             confirmed = detector.process_window(frame)
             recorder.feed(frame, confirmed)
             if confirmed:
-                now = time.monotonic()
-                if cooldown_elapsed(last_alert_time, now, cooldown_seconds):
-                    last_alert_time = now
+                # Enqueue only — delivery, retries and the cooldown live on the
+                # sender thread so this loop never waits on the network.
+                outcome = sender.smoke()
+                if outcome == "queued":
                     logger.warning("ALARM DETECTED — sending notification")
-                    notifier.send()
-                else:
-                    remaining = int(cooldown_seconds - (now - last_alert_time))
-                    logger.info("Alarm detected but in cooldown (%ds remaining)", remaining)
+                elif outcome == "cooldown":
+                    logger.info("Alarm detected but in cooldown (%ds remaining)",
+                                sender.cooldown_remaining())
 
     # Callers (tests, an embedding process) can pass their own event to shut the
     # worker threads and the stream supervisor down cleanly; __main__ relies on
     # KeyboardInterrupt instead and leaves this None.
     if stop_event is None:
         stop_event = threading.Event()
+    sender = AlertSender(notifier, stop_event, cooldown_seconds).start()
 
     def power_monitor_loop():
         last_power_alert_time = None
@@ -235,7 +234,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
         if not previous_ac:
             logger.warning("Started on battery power — sending notification")
             last_power_alert_time = time.monotonic()
-            notifier.send(
+            sender.send(
                 message="Laptop lost AC power!",
                 title="POWER ALERT",
                 tags="electric_plug,warning",
@@ -249,7 +248,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
                 if cooldown_elapsed(last_power_alert_time, now, power_cooldown_seconds):
                     last_power_alert_time = now
                     logger.warning("AC power lost — sending notification")
-                    notifier.send(
+                    sender.send(
                         message="Laptop lost AC power!",
                         title="POWER ALERT",
                         tags="electric_plug,warning",
@@ -280,7 +279,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
 
         if stop_event.wait(wait):
             return
-        notifier.send(
+        sender.send(
             message="Smoke monitor is running normally.",
             title="Smoke Monitor OK",
             tags="white_check_mark",
@@ -290,7 +289,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
 
         interval_seconds = interval_hours * 3600
         while not stop_event.wait(interval_seconds):
-            notifier.send(
+            sender.send(
                 message="Smoke monitor is running normally.",
                 title="Smoke Monitor OK",
                 tags="white_check_mark",
@@ -339,7 +338,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
                     describe_device(sd.query_devices(), current_device), e, DEVICE_RETRY_SECONDS,
                 )
                 if not announced_loss:
-                    notifier.send(
+                    sender.send(
                         message=f"Smoke monitor lost its microphone ({e}). Retrying…",
                         title="Mic offline", tags="microphone,warning", priority="low",
                     )
@@ -368,7 +367,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
                         confirmed_healthy = True
                         if announced_loss:
                             logger.warning("Input device recovered: %s", desc)
-                            notifier.send(
+                            sender.send(
                                 message=f"Smoke monitor microphone is back ({desc}).",
                                 title="Mic online", tags="microphone,white_check_mark",
                                 priority="low",
@@ -383,7 +382,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
                             "Input device %s looks lost (%s) — reconnecting", desc, verdict,
                         )
                         if not announced_loss:
-                            notifier.send(
+                            sender.send(
                                 message=f"Smoke monitor lost its microphone ({verdict}). Reconnecting…",
                                 title="Mic offline", tags="microphone,warning", priority="low",
                             )
@@ -399,7 +398,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
                                 "Higher-priority input device available: %d %s — switching",
                                 *upgrade,
                             )
-                            notifier.send(
+                            sender.send(
                                 message=f"Smoke monitor switched microphone to {upgrade[1]}.",
                                 title="Mic switched", tags="microphone", priority="low",
                             )
@@ -415,6 +414,7 @@ def run(config_path: str = "config.toml", testing: bool = False, stop_event=None
     worker.join()
     power_worker.join()
     heartbeat_worker.join()
+    sender.join(timeout=5)
 
 
 if __name__ == "__main__":
@@ -481,6 +481,7 @@ if __name__ == "__main__":
         logger.info("Tone finished")
     elif args.notify:
         config = load_config(args.config)
-        Notifier(config).send("Test notification from smoke-monitor")
+        ok = Notifier(config).send("Test notification from smoke-monitor")
+        raise SystemExit(0 if ok else 1)
     else:
         run(config_path=args.config, testing=args.test)
